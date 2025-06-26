@@ -1,0 +1,5 @@
+[2025-06-18 17:45:00,644] multiqc.core.update_config                         [INFO   ]  Report title: Socs3_MultiQC_merged
+[2025-06-18 17:45:01,693] multiqc.core.version_check                         [WARNING]  MultiQC Version v1.29 now available!
+[2025-06-18 17:45:01,704] multiqc.core.file_search                           [INFO   ]  Search path: /mnt/beegfs/mccarthy/scratch/general/adunstone/Socs3_Knockout_RNA/output/FastQC_merged
+[2025-06-18 17:45:04,612] multiqc.modules.fastqc.fastqc                      [INFO   ]  Found 12 reports
+[2025-06-18 17:45:16,534] multiqc.core.write_results                         [INFO   ]  Existing reports found, adding suffix to filenames. Use '--force' to overwrite.

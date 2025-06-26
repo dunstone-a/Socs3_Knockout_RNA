@@ -1,0 +1,4 @@
+[2025-06-06 19:15:03,679] multiqc.core.update_config                         [INFO   ]  Report title: Socs3_MultiQC
+[2025-06-06 19:15:05,871] multiqc.core.version_check                         [WARNING]  MultiQC Version v1.29 now available!
+[2025-06-06 19:15:05,887] multiqc.core.file_search                           [INFO   ]  Search path: /mnt/beegfs/mccarthy/scratch/general/adunstone/Socs3_Knockout_RNA/output/FastQC
+[2025-06-06 19:15:15,142] multiqc.modules.fastqc.fastqc                      [INFO   ]  Found 96 reports
