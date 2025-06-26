@@ -1,0 +1,14 @@
+{
+	"n_targets": 116313,
+	"n_bootstraps": 100,
+	"n_processed": 105778402,
+	"n_pseudoaligned": 67368743,
+	"n_unique": 25413747,
+	"p_pseudoaligned": 63.7,
+	"p_unique": 24.0,
+	"kallisto_version": "0.51.1",
+	"index_version": 13,
+	"k-mer length": 31,
+	"start_time": "Wed Jun 18 16:24:18 2025",
+	"call": "kallisto quant -i ../references/grcm39.idx -o ../data/kallisto/Tube2_Cort_22YMFCLT3_output -b 100 -t 8 ../data/merged_fastq/Tube2_Cort_22YMFCLT3_R1_merged.fastq.gz ../data/merged_fastq/Tube2_Cort_22YMFCLT3_R2_merged.fastq.gz"
+}
