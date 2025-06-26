@@ -1,0 +1,833 @@
+---
+title: "Obtain gene fetaures for the Socs3 knockout data"
+description: |
+  Analysis of the Socs3 knockout data.
+author:
+  - name: Amelia Dunstone
+    url: https://github.com/dunstone-a
+    affiliation: St. Vincent's Institute of Medical Research
+    affiliation_url: https://gitlab.svi.edu.au/biocellgen-public
+date: "`r Sys.Date()`"
+editor_options: 
+  chunk_output_type: console
+output: distill::distill_article
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Generating a count matrix
+
+There are a number of pre-processing steps required to obtain a count matrix of this data. 
+First, the .fastq files from the same sample and read combination were merged together. 
+There are 6 samples so this results in 12 .fastq files. 
+
+Next, the paired-end reads were aligned to the reference mouse transcriptome using Kallisto. 
+
+Since this uses gene transcripts instead of IDs, this document will obtain gene IDs from the transcript IDs. 
+
+```{r}
+library(here)
+library(tximport)
+library(biomaRt)
+library(edgeR)
+library(patchwork)
+
+samples_output <- list.files(here("data/kallisto"))
+
+# Get this to work and look at the files
+file_paths <- here("data/kallisto/", samples_output, "abundance.h5")
+names(file_paths) <- gsub("_output", "", samples_output)
+
+# Use biomaRt to map transcripts to gene_ids
+mart <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+transcript_map <- getBM(
+  attributes = c("ensembl_transcript_id",
+                 "ensembl_gene_id",
+                 "external_gene_name",
+                 "chromosome_name"),
+  mart = mart
+)
+
+txi.kallisto <- tximport(
+    file_paths, 
+    type = "kallisto", 
+    txOut = FALSE,
+    tx2gene = transcript_map[, c("ensembl_transcript_id", "ensembl_gene_id")],
+    ignoreTxVersion = TRUE
+    )
+head(txi.kallisto$counts)
+```
+
+
+
+# RNA seq analysis
+
+This analysis generates MDS plots to visualize sample groups and batch effects using the limma and edgeR packages.
+
+Following the guide "RNA-seq analysis is easy as 1-2-3 with limma, Glimma and edgeR" (Law et al. 2018), see [https://pmc.ncbi.nlm.nih.gov/articles/PMC4937821/](https://pmc.ncbi.nlm.nih.gov/articles/PMC4937821/).
+
+```{r}
+# Load required libraries for the document 
+library(limma) 
+library(edgeR) 
+library(RColorBrewer) 
+library(ggplot2) 
+library(gridExtra) 
+library(dplyr)
+
+# Read in count data
+counts <- txi.kallisto$counts
+
+# Subset the transcript_map to match our data
+dim(transcript_map)
+gene_info <- transcript_map[match(row.names(counts), transcript_map$ensembl_gene_id), ]
+dim(gene_info)
+
+gene_info$CHR <- gene_info$chromosome_name
+gene_info$SYMBOL <- gene_info$external_gene_name
+gene_info$ENSEMBL <- gene_info$ensembl_gene_id
+```
+
+```{r}
+# Read in sample sheet
+samples <- read.csv(here("data/sample_sheet.csv"), row.names = 1)
+
+colnames(counts) <- gsub("_22YMFCLT3", "", colnames(counts))
+
+# The sample sheet is already in the correct order
+stopifnot(identical(samples$Sample_name, colnames(counts)))
+
+colnames(counts) <- samples$group
+```
+
+Next we create a DGEList from the count data and the sample sheet. 
+The count data contains a column for each sample of the experiment (6 in total). 
+The sample sheet includes information about the mouse genotype and the batches. 
+
+The DGEList object includes counts for the numeric data, and the `samples` and `genes` data frames, which contains information about the samples and features, respectively. 
+
+
+```{r}
+# Create the DGEList. 
+dge <- DGEList(
+    counts, 
+    samples = samples, 
+    group = samples$group, 
+    genes = gene_info)
+dim(dge)
+```
+
+
+## Organising sample information
+
+```{r}
+group <- dge$samples$group
+lane <- gsub(".+_", "", dge$samples$Name)
+batch <- gsub(".+_", "", dge$samples$group)
+treatment <- gsub("_.+", "", dge$samples$group)
+
+# Make sample info factors
+group <- factor(group, levels=c("WT_1_B2", "WT_2_B1", "WT_3_B1", 
+    "SOCS3_1_B2", "SOCS3_2_B1", "SOCS3_3_B1"))
+batch <- factor(batch)
+treatment <- factor(treatment, levels=c("WT", "SOCS3"))
+
+# Add sample info into samples slot. 
+dge$samples$batch <- batch
+dge$samples$treatment <- treatment
+```
+
+There are 6 mice, 3 for each treatment. 
+
+```{r}
+table(group, treatment)
+```
+
+```{r, include=FALSE}
+dge$samples
+```
+
+## Gene annotation summary
+
+After mapping the sequencing reads to the transcriptome, we have Ensembl-style transcript identifiers.
+These are used by mapping tools as they are unambiguous and highly stable. 
+We have used the `biomaRt` package to match these IDs to gene symbols and to obtain chromosome information, for easier interpretation of the results. 
+
+```{r}
+# There are hundreds of duplicate symbols.
+table(duplicated(gene_info$SYMBOL))
+# No duplicate ENSEMBL id's now. 
+table(duplicated(gene_info$ENSEMBL))
+```
+
+There are some Ensembl IDs which map to the same gene symbols. For these features we will refer to the genes using both the Ensembl ID and the symbol, for example 
+
+```{r}
+library(scuttle)
+
+rownames(dge) <- uniquifyFeatureNames(dge$genes$ENSEMBL, dge$genes$SYMBOL)
+# Duplicate features with symbols have their ID concatenated.  
+# rownames(dge)[duplicated(dge$genes$SYMBOL) & !is.na(dge$genes$SYMBOL)]
+# Now there are unique rownames. 
+table(duplicated(rownames(dge)))
+```
+
+We remove features which aren't expressed in any samples of our data.
+
+In doing this we also check that this have not removed any of our genes of interest, which include *Socs1*, *Socs3* and *Bcl3*.
+Reassuringly, these features are not removed during this step and thus have some expression in the data. 
+
+```{r}
+genes_of_interest <- c("Socs1", "Socs3", "Bcl3")
+# genes of interest are in our rownames originally
+genes_of_interest %in% dge$genes$SYMBOL
+
+# Remove genes expressed in no samples. 
+dge_zeroes <- dge[(rowSums(dge$counts) == 0), ]
+
+# See if any of our genes of interest are not being expressed
+genes_of_interest %in% dge_zeroes$genes$SYMBOL
+
+# Remove features which aren't expressed in any samples. 
+dge <- dge[(rowSums(dge$counts) > 0), ]
+```
+
+```{r}
+# Remove problematic genes
+remove <- rownames(dge) %in% c("Igkv10-96", "Ighv1-53")
+
+dge <- dge[!remove, ]
+```
+
+There are `r nrow(dge)` genes remaining, and `r nrow(dge_zeroes)` have been removed based on this metric. 
+
+## Data pre-processing
+
+```{r}
+# NOTE: Annoyingly, my cpm function is being masked by SingleCellExperiment. 
+# Having to specify the edgeR package to get this line to work. 
+
+# Transform from raw scale
+cpm <- edgeR::cpm(dge)
+lcpm <- edgeR::cpm(dge, log=TRUE)
+```
+
+```{r}
+# There are no genes that are expressed in no sample as I already
+# removed them. 
+table(rowSums(dge$counts == 0) == 6)
+# The smallest amount of counts for a gene is 1 across the 6 samples
+min(rowSums(dge$counts))
+
+keep.exprs <- filterByExpr(dge, group=dge$samples$group)
+dge <- dge[keep.exprs,, keep.lib.sizes=FALSE]
+dim(dge)
+# This function keeps genes with about 10 read counts or more in a minimum
+# number of samples.
+sum(keep.exprs == FALSE)
+```
+
+Filtering using `FilterByExpr` from the `edgeR` package removes genes with very low expression. 
+These low quality genes result in a spike near 0 in the left-hand side of the plot below. 
+
+There are `r sum(keep.exprs == FALSE)` genes which are removed due to having low expression. 
+There are `r nrow(dge)` genes remaining for analysis. 
+
+```{r}
+# Figure 1: Density of the raw post filtered data
+
+# M is the mean, L is the median
+L <- mean(dge$samples$lib.size) * 1e-6
+M <- median(dge$samples$lib.size) * 1e-6
+c(L, M)
+
+lcpm.cutoff <- log2(10/M + 2/L)
+library(RColorBrewer)
+nsamples <- length(unique(group))
+col <- brewer.pal(nsamples, "Paired")
+par(mfrow=c(1,2))
+plot(density(lcpm[,1]), col=col[1], lwd=2, ylim=c(0,0.26), las=2, main="", xlab="")
+title(main="A. Raw data", xlab="Log-cpm")
+abline(v=lcpm.cutoff, lty=3)
+for (i in 2:nsamples){
+  den <- density(lcpm[,i])
+  lines(den$x, den$y, col=col[i], lwd=2)
+}
+legend("topright", as.character(unique(group)), text.col=col, bty="n")
+lcpm <- edgeR::cpm(dge, log=TRUE)
+plot(density(lcpm[,1]), col=col[1], lwd=2, ylim=c(0,0.26), las=2, main="", xlab="")
+title(main="B. Filtered data", xlab="Log-cpm")
+abline(v=lcpm.cutoff, lty=3)
+for (i in 2:nsamples){
+  den <- density(lcpm[,i])
+  lines(den$x, den$y, col=col[i], lwd=2)
+}
+legend("topright", as.character(unique(group)), text.col=col, bty="n")
+```
+
+# Normalising gene expression
+
+
+```{r}
+dge2 <- dge
+dge2$samples$norm.factors <- 1
+
+
+
+par(mfrow=c(1,2))
+lcpm <- edgeR::cpm(dge2, log=TRUE)
+boxplot(lcpm, las=2, col=col, main="")
+title(main="A. Example: Unnormalised data", ylab="Log-cpm")
+
+dge <- calcNormFactors(dge, method = "TMM")
+
+dge$samples$norm.factors
+## [1] 0.0577 6.0829 1.2202 1.1648 1.1966 1.0466 1.1505 1.2543 1.1090
+
+lcpm <- edgeR::cpm(dge, log=TRUE)
+boxplot(lcpm, las=2, col=col, main="")
+title(main="B. Example: Normalised data", ylab="Log-cpm")
+```
+
+```{r}
+apply(dge$counts, MARGIN = 2, FUN = function(x) {sum(x > 1)})
+
+```
+
+## Comparing library size between samples
+
+```{r}
+# Set colours for this data set
+group_colours <- setNames(
+    ggthemes::tableau_color_pal("Tableau 10")(6), 
+    levels(group))
+
+batch_colours <- setNames(
+    brewer.pal(8, "Dark2")[3:4], 
+    levels(batch))
+
+treatment_colours <- setNames(
+    brewer.pal(8, "Dark2")[1:2], 
+    levels(treatment))
+```
+
+```{r, fig.asp = 1}
+levels(dge$samples$group) <- c("WT_2_B1", "WT_3_B1", "SOCS3_2_B1", "SOCS3_3_B1", "WT_1_B2", "SOCS3_1_B2")
+
+p1 <- ggplot(data = dge$samples, mapping = aes(y = group, x = lib.size, fill = group)) + 
+    geom_col() +
+    scale_fill_manual(values = group_colours) +
+    theme_minimal()
+p2 <- ggplot(data = dge$samples, mapping = aes(y = group, x = lib.size, fill = batch)) + 
+    geom_col() +
+    scale_fill_manual(values = batch_colours) +
+    theme_minimal()
+p3 <- ggplot(data = dge$samples, mapping = aes(y = group, x = lib.size, fill = treatment)) + 
+    geom_col() +
+    scale_fill_manual(values = treatment_colours) + 
+    theme_minimal()
+p1 / p2 / p3
+```
+
+MDS plot with the library size overlayed on the samples shows that the samples from batch 2 have a much lower library size than the samples from batch 1. 
+It also shows that the sample which does not follow the trend observed for the treatment has a low library size, so this may be due to low quality samples. 
+
+```{r, fig.asp=1}
+par(mfrow = c(2,2))
+plotMDS(lcpm, labels=group, col=group_colours[group])
+title(main="A. Sample groups")
+
+plotMDS(lcpm, labels=treatment, col=treatment_colours[treatment])
+title(main="B. Treatment")
+
+plotMDS(lcpm, labels=batch, col=batch_colours[batch])
+title(main="C. Batch")
+
+# MDS plot with library size
+libsizes <- dge$samples$lib.size
+
+# Create a viridis color function
+color_func <- scales::col_numeric(viridis::viridis(100), domain = range(libsizes))
+
+# Assign colors according to library sizes
+point_colors <- color_func(libsizes)
+
+plotMDS(lcpm, labels=NULL, pch = 16, cex = 4, col=point_colors)
+title(main="D. Library Size") 
+```
+
+```{r, fig.asp=1}
+
+dge2 <- dge[,dge$samples$group != "WT_2_B1"]
+dge2$samples <- dge$samples[dge$samples$group != "WT_2_B1",]
+
+
+lcpm2 <- lcpm[, c(1, 2, 3, 4, 6)]
+
+par(mfrow = c(2,2))
+plotMDS(lcpm2, labels=colnames(lcpm2), col=group_colours[colnames(lcpm2)])
+title(main="A. Sample groups")
+
+plotMDS(lcpm2, labels=dge2$samples$treatment, col=treatment_colours[dge2$samples$treatment])
+title(main="B. Treatment")
+
+plotMDS(lcpm2, labels=dge2$samples$batch, col=batch_colours[dge2$samples$batch])
+title(main="C. Batch")
+
+# MDS plot with library size
+libsizes2 <- dge2$samples$lib.size
+
+# Create a viridis color function
+color_func <- scales::col_numeric(viridis::viridis(100), domain = range(libsizes2))
+
+# Assign colors according to library sizes
+point_colors2 <- color_func(libsizes2)
+
+plotMDS(lcpm2, labels=NULL, pch = 16, cex = 4, col=point_colors2)
+title(main="D. Library Size") 
+```
+
+
+
+## Comparing batches for genes of interest
+
+```{r, fig.asp = 3/8}
+genes_of_interest <- c("Socs3", "Socs1", "Bcl3")
+selected_genes <- grep(glue::glue_collapse(genes_of_interest, "|"), dge$genes$SYMBOL)
+
+cpm <- edgeR::cpm(dge)
+lcpm <- edgeR::cpm(dge, log=TRUE)
+df <- data.frame(
+    y = t(lcpm[selected_genes, ]), 
+    treatment = dge$samples$treatment, 
+    batch = dge$samples$batch)
+
+# NOTE: The order of the columns corresponds to the order of these genes in the 
+#   rownames, NOT the order that was listed in genes_of_interest.
+colnames(df)[1:3] <- gsub("y.", "", colnames(df)[1:3])
+
+df$labels <- factor(paste0(df$batch, ".", df$treatment),
+    levels=c("B1.WT", "B1.SOCS3", "B2.WT", "B2.SOCS3"))
+
+plot_list <- list()
+for (i in 1:3) {
+    plot_list[[i]] <-
+        ggplot(data = df, mapping = aes(x = labels, y = .data[[genes_of_interest[i]]], group = labels, colour = treatment)) + 
+            geom_point(size = 4) + 
+            theme_minimal() + 
+            theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+            ylab("Expression (log CPM)") + 
+            scale_colour_manual(values = treatment_colours) +
+            ggtitle(label = paste0(genes_of_interest[i])
+    )
+}
+patchwork::wrap_plots(plot_list, ncol = 3, guides = "collect") 
+```
+
+```{r}
+# Table format
+lcpm[selected_genes, ] |>
+    as.data.frame() |>
+    tibble::rownames_to_column("ENSEMBL") |>
+    dplyr::mutate(SYMBOL = dge$genes$SYMBOL[selected_genes], .after = "ENSEMBL")
+
+```
+
+
+# DE
+
+```{r}
+design <- model.matrix(~0+treatment+batch)
+
+colnames(design) <- gsub("treatment|batch", "", colnames(design))
+
+contr.matrix <- makeContrasts(
+   SOCS3vsWT = SOCS3 - WT,
+   levels = colnames(design))
+contr.matrix
+
+
+v <- voom(dge, design, plot=TRUE)
+
+
+vfit <- lmFit(v, design)
+vfit <- contrasts.fit(vfit, contrasts=contr.matrix)
+
+efit <- eBayes(vfit)
+plotSA(efit)
+
+summary(decideTests(efit))
+
+tfit <- treat(vfit, lfc=0.1)
+de_results <- decideTests(tfit)
+summary(de_results)
+
+
+head(tfit$genes$SYMBOL[de_results != 0], n=20)
+
+
+dir.create(here("output/DE"), recursive = TRUE)
+write.fit(tfit, de_results, file=here("output/DE/DE_lane_model.txt"))
+```
+
+```{r}
+# View the differential expression results for our genes of interest, as a sanity check. 
+de_table <- topTable(efit, n = Inf)
+
+# Results for the genes of interest are not significant
+de_table[de_table$SYMBOL %in% genes_of_interest, ]
+
+```
+
+
+
+## Plots of the most differentially expressed genes
+
+Plots of the most differentially expressed genes to see if the test is doing what we want it to do. 
+
+```{r, fig.asp = 1}
+top_genes <- head(rownames(de_table), n = 6)
+
+selected_genes <- match(top_genes, rownames(dge))
+
+df <- data.frame(
+    y = t(lcpm[selected_genes, ]), 
+    treatment = dge$samples$treatment, 
+    batch = dge$samples$batch)
+
+colnames(df)[1:length(top_genes)] <- rownames(dge)[selected_genes]
+
+df$labels <- factor(paste0(df$batch, ".", df$treatment),
+    levels=c("B1.WT", "B1.SOCS3", "B2.WT", "B2.SOCS3"))
+
+plot_list <- list()
+for (i in 1:length(top_genes)) {
+    plot_list[[i]] <-
+        ggplot(data = df, mapping = aes(x = labels, y = .data[[top_genes[i]]], group = labels, colour = treatment)) + 
+            geom_point(size = 4) + 
+            theme_minimal() + 
+            theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+            ylab("Expression (log CPM)") + 
+            scale_colour_manual(values = treatment_colours) +
+            ggtitle(label = paste0(top_genes[i])
+    )
+}
+patchwork::wrap_plots(plot_list, ncol = 3, guides = "collect") 
+
+# Corresponds to:
+head(de_table, n = 6)
+```
+
+
+
+
+# DE with aggregating over lanes
+
+```{r}
+design <- model.matrix(~0+treatment+batch)
+
+colnames(design) <- gsub("treatment|batch", "", colnames(design))
+design
+
+contr.matrix <- makeContrasts(
+   SOCS3vsWT = SOCS3 - WT,
+   levels = colnames(design))
+contr.matrix
+
+
+v <- voom(dge, design, plot=TRUE)
+
+
+vfit <- lmFit(v, design)
+vfit <- contrasts.fit(vfit, contrasts=contr.matrix)
+
+efit <- eBayes(vfit)
+plotSA(efit)
+
+summary(decideTests(efit))
+
+
+tfit <- treat(vfit, lfc=0.1)
+de_results <- decideTests(tfit)
+summary(de_results)
+
+
+head(tfit$genes$SYMBOL[de_results != 0], n=20)
+
+##  [1] "Xkr4"          "Rgs20"         "Cpa6"           "A830018L16Rik" "Sulf1"
+##  [6] "Eya1"          "Msc"           "Sbspon"         "Pi15"          "Crispld1"
+## [11] "Kcnq5"         "Rims1"         "Khdrbs2"        "Ptpn18"        "Prss39"
+## [16] "Arhgef4"       "Cnga3"         "2010300C02Rik"  "Aff3"          "Npas2"
+
+write.fit(tfit, de_results, file=here("output/DE/DE_aggregate_over_lane.txt"))
+```
+
+# DE of batch
+
+```{r}
+design <- model.matrix(~0+batch)
+
+colnames(design) <- gsub("batch", "", colnames(design))
+design
+
+contr.matrix <- makeContrasts(
+   B2vsB1 = B2 - B1,
+   levels = colnames(design))
+contr.matrix
+
+
+v <- voom(dge, design, plot=TRUE)
+
+
+vfit <- lmFit(v, design)
+vfit <- contrasts.fit(vfit, contrasts=contr.matrix)
+
+efit <- eBayes(vfit)
+plotSA(efit)
+
+summary(decideTests(efit))
+
+
+tfit <- treat(vfit, lfc=0.1)
+de_results <- decideTests(tfit)
+summary(de_results)
+
+
+head(tfit$genes$SYMBOL[de_results != 0], n=20)
+
+##  [1] "Xkr4"          "Rgs20"         "Cpa6"           "A830018L16Rik" "Sulf1"
+##  [6] "Eya1"          "Msc"           "Sbspon"         "Pi15"          "Crispld1"
+## [11] "Kcnq5"         "Rims1"         "Khdrbs2"        "Ptpn18"        "Prss39"
+## [16] "Arhgef4"       "Cnga3"         "2010300C02Rik"  "Aff3"          "Npas2"
+
+write.fit(tfit, de_results, file=here("output/DE/DE_aggregate_over_lane.txt"))
+```
+
+
+```{r, fig.asp=1}
+library(pheatmap)
+
+# Filter DE genes with FDR < 0.05
+de_genes <- topTable(efit, coef = "B2vsB1", number = Inf)
+de_genes_sig <- de_genes[de_genes$adj.P.Val < 0.05, ]
+
+# Select top 50 DE genes by smallest FDR
+top50_genes <- head(rownames(de_genes_sig), 50)
+
+# Use voom-transformed expression matrix
+expr_mat <- v$E[top50_genes, ]
+
+# Sample annotations: Treatment and Batch
+annotation_col <- dge$samples[, c("batch", "treatment")]
+colnames(annotation_col) <- c("Batch", "Treatment")
+
+# Z-score normalize rows (genes)
+log_cpm_scaled <- t(scale(t(expr_mat)))
+
+# Plot heatmap
+pheatmap(log_cpm_scaled,
+         annotation_col = annotation_col,
+         show_rownames = TRUE,
+         show_colnames = FALSE,
+         cluster_cols = FALSE,
+         clustering_distance_rows = "euclidean",
+         clustering_distance_cols = "euclidean",
+         clustering_method = "complete",
+         fontsize_row = 6,
+         main = "Top 50 DE Genes (FDR < 0.05, edgeR LRT)")
+
+```
+
+
+```{r, fig.asp = 1/2}
+genes_of_interest <- c("Socs3", "Socs1", "Bcl3")
+selected_genes <- grep(glue::glue_collapse(genes_of_interest, "|"), dge$genes$SYMBOL)
+
+cpm <- edgeR::cpm(dge)
+lcpm <- edgeR::cpm(dge, log=TRUE)
+df <- data.frame(
+    y = t(lcpm[selected_genes, ]), 
+    treatment = dge$samples$treatment, 
+    batch = dge$samples$batch)
+
+# NOTE: The order of the columns corresponds to the order of these genes in the 
+#   rownames, NOT the order that was listed in genes_of_interest.
+colnames(df)[1:3] <- gsub("y.", "", colnames(df)[1:3])
+
+df$labels <- factor(paste0(df$batch, ".", df$treatment),
+    levels=c("B1.WT", "B1.SOCS3", "B2.WT", "B2.SOCS3"))
+
+plot_list <- list()
+for (i in 1:3) {
+    plot_list[[i]] <-
+        ggplot(data = df, mapping = aes(x = labels, y = .data[[genes_of_interest[i]]], group = labels, colour = treatment)) + 
+            geom_point(size = 4) + 
+            theme_minimal() + 
+            theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+            ylab("Expression (log CPM)") + 
+            scale_colour_manual(values = treatment_colours) +
+            ggtitle(label = paste0(genes_of_interest[i])
+    )
+}
+patchwork::wrap_plots(plot_list, ncol = 3, guides = "collect") 
+```
+
+```{r}
+# Table format
+lcpm[selected_genes, ] |>
+    as.data.frame() |>
+    tibble::rownames_to_column("ENSEMBL") |>
+    dplyr::mutate(SYMBOL = dge$genes$SYMBOL[selected_genes], .after = "ENSEMBL")
+
+```
+
+# DE with aggregating over lanes
+
+```{r}
+design <- model.matrix(~0+treatment+batch, data=dge$samples)
+
+colnames(design) <- gsub("treatment|batch", "", colnames(design))
+design
+
+contr.matrix <- makeContrasts(
+   SOCS3vsWT = SOCS3 - WT,
+   levels = colnames(design))
+contr.matrix
+
+
+v <- voom(dge, design, plot=TRUE)
+
+
+vfit <- lmFit(v, design)
+vfit <- contrasts.fit(vfit, contrasts=contr.matrix)
+
+efit <- eBayes(vfit)
+plotSA(efit)
+
+summary(decideTests(efit))
+
+tfit <- treat(vfit, lfc=0.1)
+de_results <- decideTests(tfit)
+summary(de_results)
+
+
+head(tfit$genes$SYMBOL[de_results != 0], n=20)
+
+
+write.fit(tfit, de_results, file=here("output/DE/DE_aggregated.txt"))
+```
+
+# Slightly different way of doing DE
+
+
+## DE with batch
+
+
+```{r}
+design <- model.matrix(~ treatment + batch) 
+dge <- estimateDisp(dge, design) 
+fit <- glmFit(dge, design) 
+lrt <- glmLRT(fit, coef = 2) 
+de_results <- topTags(lrt, n = Inf)$table 
+head(de_results) 
+
+# Number of DE genes
+nrow(de_results[de_results$FDR < 0.05, ])
+
+# See the values of the DE for genes of interest
+genes_of_interest <- c("Socs3", "Socs1", "Bcl3")
+
+de_results[de_results$SYMBOL %in% genes_of_interest, ]
+```
+
+
+```{r}
+design <- model.matrix(~ treatment) 
+dge <- estimateDisp(dge, design) 
+fit <- glmFit(dge, design) 
+lrt <- glmLRT(fit, coef = 2) 
+de_results <- topTags(lrt, n = Inf)$table 
+head(de_results) 
+
+# Number of DE genes
+nrow(de_results[de_results$FDR < 0.05, ])
+
+# See the values of the DE for genes of interest
+genes_of_interest <- c("Socs3", "Socs1", "Bcl3")
+
+de_results[de_results$SYMBOL %in% genes_of_interest, ]
+```
+
+
+```{r, fig.asp = 1}
+top_genes <- head(rownames(de_table), n = 6)
+
+selected_genes <- match(top_genes, rownames(dge))
+
+df <- data.frame(
+    y = t(lcpm[selected_genes, ]), 
+    treatment = dge$samples$treatment, 
+    batch = dge$samples$batch)
+
+colnames(df)[1:length(top_genes)] <- rownames(dge)[selected_genes]
+
+df$labels <- factor(paste0(df$batch, ".", df$treatment),
+    levels=c("B1.WT", "B1.SOCS3", "B2.WT", "B2.SOCS3"))
+
+plot_list <- list()
+for (i in 1:length(top_genes)) {
+    plot_list[[i]] <-
+        ggplot(data = df, mapping = aes(x = labels, y = .data[[top_genes[i]]], group = labels, colour = treatment)) + 
+            geom_point(size = 4) + 
+            theme_minimal() + 
+            theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+            ylab("Expression (log CPM)") + 
+            scale_colour_manual(values = treatment_colours) +
+            ggtitle(label = paste0(top_genes[i])
+    )
+}
+patchwork::wrap_plots(plot_list, ncol = 3, guides = "collect") 
+
+# Corresponds to:
+head(de_results, n = 6)
+```
+
+
+```{r, fig.asp=1}
+library(pheatmap)
+
+# Filter top 50 DE genes with FDR < 0.05
+de_genes_sig <- de_results[de_results$FDR < 0.05, ]
+top50_genes <- rownames(head(de_genes_sig, 50))
+
+# Log2 CPM-normalized expression matrix
+log_cpm <- edgeR::cpm(dge, log = TRUE)[top50_genes, ]
+
+# Sample annotations: Treatment and Batch
+annotation_col <- dge$samples[, c("treatment", "batch")]
+colnames(annotation_col) <- c("Treatment", "Batch")
+
+# Z-score normalize rows (genes)
+log_cpm_scaled <- t(scale(t(log_cpm)))
+
+# Plot heatmap
+pheatmap(log_cpm_scaled,
+         annotation_col = annotation_col,
+         show_rownames = TRUE,
+         show_colnames = FALSE,
+         cluster_cols = TRUE,
+         clustering_distance_rows = "euclidean",
+         clustering_distance_cols = "euclidean",
+         clustering_method = "complete",
+         fontsize_row = 6,
+         main = "Top 50 DE Genes (FDR < 0.05, edgeR LRT)")
+
+```
+
+```{r}
+write.csv(de_results, file=here("output/DE/DE_LRT_batch.csv"), row.names = TRUE) 
+```
+
