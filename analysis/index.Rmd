@@ -1,0 +1,25 @@
+---
+title: "Differential expression analysis of the Socs3 knockout data"
+output:
+  html_document
+editor_options:
+  chunk_output_type: console
+---
+
+**Aim**: Investigate the differences in gene expression between wild-type samples and Socs3 knockout samples. 
+
+**Samples**:
+
+We have 6 mice samples, 3 are wild-type and 3 are Socs3 knockout samples. 
+
+- WT: Wild-type.
+- SOCS3: Socs3 gene knockout. 
+
+Each sample was sequenced across 8 lanes. 
+
+**Batches**:
+
+There are 2 batches. 
+
+- Batch1: 2 WT samples, 2 SOCS3 samples. 
+- Batch2: 1 WT sample, 1 SOCS3 sample.
