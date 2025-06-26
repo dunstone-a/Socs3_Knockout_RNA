@@ -1,0 +1,21 @@
+name: "Socs3_Knockout_RNA"
+output_dir: "../docs"
+navbar:
+  title: "Socs3 Knockout Bulk RNA-seq"
+  left:
+  - text: "Home"
+    href: index.html
+  - text: "Analysis"
+    menu:
+    - text: "Kallisto analysis"
+      href: Kallisto_analysis.html
+    - text: "Analysis of filtered output 3"
+      href: Filtered_output_3_analysis.html
+  right:
+  - icon: fab fa-github
+    text: Source code
+    href: https://gitlab.svi.edu.au/igr-lab/Socs3_Knockout_RNA
+output:
+  distill::distill_article:
+    toc: true
+    toc_depth: 1
