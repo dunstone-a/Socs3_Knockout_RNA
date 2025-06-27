@@ -1,7 +1,7 @@
-"","Sample_name","Genotype","Mouse_ID","group"
-"WT_1_B2","260_Cort","Socs3 w/w","260(F)","WT_1_B2"
-"SOCS3_1_B2","985_Cort","Socs3 f/f","985(F)","SOCS3_1_B2"
-"SOCS3_2_B1","Tube1_Cort","Socs3 f/f","1190(F), 1185(F), 1186(F)","SOCS3_2_B1"
-"SOCS3_3_B1","Tube2_Cort","Socs3 f/f","1187(F), 1195(F)","SOCS3_3_B1"
-"WT_2_B1","Tube3_Cort","Socs3 w/w","1200(F), 1204(F), 309(F)","WT_2_B1"
-"WT_3_B1","Tube4_Cort","Socs3 w/w","311(F), 316(F)","WT_3_B1"
+,Sample_name,Genotype,Mouse_ID,group,Date_Tx_Injection,Date_cull,Age,Concentration
+WT_1_B2,260_Cort,Socs3 w/w,260(F),WT_1_B2,4-Jul,20-Aug,18,0.97
+SOCS3_1_B2,985_Cort,Socs3 f/f,985(F),SOCS3_1_B2,22-Jul,20-Aug,16,0.614
+SOCS3_2_B1,Tube1_Cort,Socs3 f/f,"1190(F), 1185(F), 1186(F)",SOCS3_2_B1,8-Jan,4-Feb,16,2.6
+SOCS3_3_B1,Tube2_Cort,Socs3 f/f,"1187(F), 1195(F)",SOCS3_3_B1,8-Jan,4-Feb,16,4.7
+WT_2_B1,Tube3_Cort,Socs3 w/w,"1200(F), 1204(F), 309(F)",WT_2_B1,"8/01, 8/01, 11/12",4-Feb,"16, 16, 19",1.53
+WT_3_B1,Tube4_Cort,Socs3 w/w,"311(F), 316(F)",WT_3_B1,11-Dec,4-Feb,"19, 18",2.2
