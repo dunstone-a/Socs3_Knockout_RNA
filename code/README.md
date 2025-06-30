@@ -23,4 +23,4 @@ Most of these steps require the use of a computing cluster, as they require a la
 - Build the kallisto index based on the cDNA mouse reference. 
 
 `06_kallisto_align.sh`
-- Allign the reads to the kallisto index and output abundance.h5 files for each sample. These files can be loaded in as count matrices in R. 
+- Align the reads to the kallisto index and output abundance.h5 files for each sample. These files can be loaded in as count matrices in R. 
