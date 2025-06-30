@@ -1,7 +1,5 @@
 ---
-title: "Obtain gene fetaures for the Socs3 knockout data"
-description: |
-  Analysis of the Socs3 knockout data.
+title: "Analysis of the Socs3 knockout data with kallisto alignment."
 author:
   - name: Amelia Dunstone
     url: https://github.com/dunstone-a
@@ -17,23 +15,51 @@ output: distill::distill_article
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Generating a count matrix
+# Introduction
 
-There are a number of pre-processing steps required to obtain a count matrix of this data. 
-First, the .fastq files from the same sample and read combination were merged together. 
-There are 6 samples so this results in 12 .fastq files. 
+This report includes an analysis of the Socs3 knockout bulk RNA-sequencing data. 
+The data includes 6 samples, 3 from the control group (wild-type) and 3 from the Socs3 knockout group. 
+The samples are from bone tissue of mice (and some samples contain multiple mice). 
+We are interested in seeing if there are differences in gene expression between these groups, as this will help to understand the role of Socs3.  
 
-Next, the paired-end reads were aligned to the reference mouse transcriptome using Kallisto. 
+The gene filtering, normalisation, MDS plot and differential expression testing is based on the guide "RNA-seq analysis is easy as 1-2-3 with limma, Glimma and edgeR" (Law et al. 2018), see [https://pmc.ncbi.nlm.nih.gov/articles/PMC4937821/](https://pmc.ncbi.nlm.nih.gov/articles/PMC4937821/).
 
-Since this uses gene transcripts instead of IDs, this document will obtain gene IDs from the transcript IDs. 
-
-```{r}
+```{r, echo = FALSE, message = FALSE, results = "none"}
+# Load required libraries for the document 
 library(here)
 library(tximport)
 library(biomaRt)
 library(edgeR)
 library(patchwork)
+library(limma) 
+library(RColorBrewer) 
+library(ggplot2) 
+library(gridExtra) 
+library(dplyr)
+library(pheatmap)
+```
 
+# Setting up the data
+
+There are a number of pre-processing steps required to obtain a count matrix of this data. 
+First, the .fastq files from the same sample and read combination were merged together (see `code/03_merge_lanes.sh`. 
+There are 6 samples so this results in 12 .fastq files (read 1 and read 2 for each sample). 
+
+Next, the paired-end reads were aligned to the reference mouse transcriptome using `kallisto`.
+
+## Mapping rate in kallisto
+
+We have a decently 
+
+
+
+
+## Reading in count data
+
+Since `kallisto` uses transcript IDs instead of gene IDs, we will use the `biomaRt` package to map transcript IDs to gene IDs. 
+When we import the data using `tximport`, the transcripts are aggregated at the gene level using this mapping.  
+
+```{r}
 samples_output <- list.files(here("data/kallisto"))
 
 # Get this to work and look at the files
@@ -41,7 +67,7 @@ file_paths <- here("data/kallisto/", samples_output, "abundance.h5")
 names(file_paths) <- gsub("_output", "", samples_output)
 
 # Use biomaRt to map transcripts to gene_ids
-mart <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+mart <- useMart("ensembl", dataset = "mmusculus_gene_ensembl", verbose = TRUE)
 
 transcript_map <- getBM(
   attributes = c("ensembl_transcript_id",
@@ -58,26 +84,15 @@ txi.kallisto <- tximport(
     tx2gene = transcript_map[, c("ensembl_transcript_id", "ensembl_gene_id")],
     ignoreTxVersion = TRUE
     )
-head(txi.kallisto$counts)
 ```
 
+Next, we create a DGEList object from the count data and the sample sheet. 
+The count data contains a column for each sample of the experiment (6 in total). 
+The sample sheet (located in `data/sample_sheet.csv`) includes information about the mouse genotype, the batches, and other experimental information.
 
+The DGEList object includes counts for the numeric data, and the `samples` and `genes` data frames, which contains information about the samples and features, respectively.  
 
-# RNA seq analysis
-
-This analysis generates MDS plots to visualize sample groups and batch effects using the limma and edgeR packages.
-
-Following the guide "RNA-seq analysis is easy as 1-2-3 with limma, Glimma and edgeR" (Law et al. 2018), see [https://pmc.ncbi.nlm.nih.gov/articles/PMC4937821/](https://pmc.ncbi.nlm.nih.gov/articles/PMC4937821/).
-
-```{r}
-# Load required libraries for the document 
-library(limma) 
-library(edgeR) 
-library(RColorBrewer) 
-library(ggplot2) 
-library(gridExtra) 
-library(dplyr)
-
+```{r, results='hide'}
 # Read in count data
 counts <- txi.kallisto$counts
 
@@ -90,6 +105,8 @@ gene_info$CHR <- gene_info$chromosome_name
 gene_info$SYMBOL <- gene_info$external_gene_name
 gene_info$ENSEMBL <- gene_info$ensembl_gene_id
 ```
+
+There are `r nrow(gene_info)` genes currently in the object.
 
 ```{r}
 # Read in sample sheet
@@ -120,12 +137,37 @@ dge <- DGEList(
 dim(dge)
 ```
 
+## Kallisto mapping information
+
+The table below shows the percentage of reads which are mapped. 
+This is a decent proportion.
+
+```{r}
+library(jsonlite)
+
+# Path to each kallisto folder
+sample_dirs <- dirname(file_paths)
+
+# Extract mapping rate from run_info.json for each sample
+mapping_rates <- sapply(sample_dirs, function(dir) {
+  info <- fromJSON(file.path(dir, "run_info.json"))
+  info$p_pseudoaligned
+})
+
+df <- data.frame(
+    File = gsub("_22YMFCLT3_output", "", basename(sample_dirs)),
+    Mapping_rate = mapping_rates)
+df$Group <- samples$group[match(df$File, samples$Sample_name)]
+
+rownames(df) <- NULL
+df[, c("Group", "Mapping_rate")]|> 
+    knitr::kable() 
+```
 
 ## Organising sample information
 
 ```{r}
 group <- dge$samples$group
-lane <- gsub(".+_", "", dge$samples$Name)
 batch <- gsub(".+_", "", dge$samples$group)
 treatment <- gsub("_.+", "", dge$samples$group)
 
@@ -140,7 +182,7 @@ dge$samples$batch <- batch
 dge$samples$treatment <- treatment
 ```
 
-There are 6 mice, 3 for each treatment. 
+There are 6 samples, 3 for each treatment. 
 
 ```{r}
 table(group, treatment)
@@ -150,22 +192,30 @@ table(group, treatment)
 dge$samples
 ```
 
-## Gene annotation summary
+```{r}
+# Remove group, treatment and batch. These should only be accessed from dge!!!
+rm(group, batch, treatment)
+```
+
+## Organising gene annotations
 
 After mapping the sequencing reads to the transcriptome, we have Ensembl-style transcript identifiers.
 These are used by mapping tools as they are unambiguous and highly stable. 
-We have used the `biomaRt` package to match these IDs to gene symbols and to obtain chromosome information, for easier interpretation of the results. 
+We have used the `biomaRt` package to match these transcript IDs to gene IDs.
+From the gene IDs, we also obtain gene symbols and chromosome information, for easier interpretation of the results. 
 
-```{r}
+```{r, results='hide'}
 # There are hundreds of duplicate symbols.
 table(duplicated(gene_info$SYMBOL))
 # No duplicate ENSEMBL id's now. 
 table(duplicated(gene_info$ENSEMBL))
 ```
 
-There are some Ensembl IDs which map to the same gene symbols. For these features we will refer to the genes using both the Ensembl ID and the symbol, for example 
+There are some Ensembl IDs which map to the same gene symbols.
+For these features we will refer to the genes using both the Ensembl ID and the symbol, for example "Pakap_ENSMUSG00000038729.25".
+This ensures that rownames are unique, giving us a robust way of subsetting the object and referring to genes in the analysis.
 
-```{r}
+```{r, results='hide'}
 library(scuttle)
 
 rownames(dge) <- uniquifyFeatureNames(dge$genes$ENSEMBL, dge$genes$SYMBOL)
@@ -173,6 +223,13 @@ rownames(dge) <- uniquifyFeatureNames(dge$genes$ENSEMBL, dge$genes$SYMBOL)
 # rownames(dge)[duplicated(dge$genes$SYMBOL) & !is.na(dge$genes$SYMBOL)]
 # Now there are unique rownames. 
 table(duplicated(rownames(dge)))
+```
+
+We save the DGEList object to file, located at `data/kallisto.dge.rds`.
+
+```{r}
+saveRDS(dge, here("data/kallisto.dge.rds"))
+dge <- readRDS(here("data/kallisto.dge.rds"))
 ```
 
 We remove features which aren't expressed in any samples of our data.
@@ -195,33 +252,22 @@ genes_of_interest %in% dge_zeroes$genes$SYMBOL
 dge <- dge[(rowSums(dge$counts) > 0), ]
 ```
 
-```{r}
-# Remove problematic genes
-remove <- rownames(dge) %in% c("Igkv10-96", "Ighv1-53")
+There are `r nrow(dge_zeroes)`  genes which aren't expressed in any of the samples.
+These will be removed by any filtering metric that we choose to use. 
+There are `r nrow(dge)` genes remaining for analysis.
 
-dge <- dge[!remove, ]
-```
-
-There are `r nrow(dge)` genes remaining, and `r nrow(dge_zeroes)` have been removed based on this metric. 
-
-## Data pre-processing
+# Pre-processing
 
 ```{r}
 # NOTE: Annoyingly, my cpm function is being masked by SingleCellExperiment. 
 # Having to specify the edgeR package to get this line to work. 
-
 # Transform from raw scale
 cpm <- edgeR::cpm(dge)
 lcpm <- edgeR::cpm(dge, log=TRUE)
 ```
 
-```{r}
-# There are no genes that are expressed in no sample as I already
-# removed them. 
-table(rowSums(dge$counts == 0) == 6)
-# The smallest amount of counts for a gene is 1 across the 6 samples
-min(rowSums(dge$counts))
 
+```{r, results='hide'}
 keep.exprs <- filterByExpr(dge, group=dge$samples$group)
 dge <- dge[keep.exprs,, keep.lib.sizes=FALSE]
 dim(dge)
@@ -230,11 +276,13 @@ dim(dge)
 sum(keep.exprs == FALSE)
 ```
 
-Filtering using `FilterByExpr` from the `edgeR` package removes genes with very low expression. 
-These low quality genes result in a spike near 0 in the left-hand side of the plot below. 
-
+Filtering using `FilterByExpr` from the `edgeR` package removes genes with very low expression.
 There are `r sum(keep.exprs == FALSE)` genes which are removed due to having low expression. 
 There are `r nrow(dge)` genes remaining for analysis. 
+
+These low quality genes result in a spike near 0 in the left-hand side of the plot below. 
+In the filtered data, the lowly expressed genes are mostly removed. 
+The samples have a similar distribution of genes in this plot.
 
 ```{r}
 # Figure 1: Density of the raw post filtered data
@@ -242,11 +290,10 @@ There are `r nrow(dge)` genes remaining for analysis.
 # M is the mean, L is the median
 L <- mean(dge$samples$lib.size) * 1e-6
 M <- median(dge$samples$lib.size) * 1e-6
-c(L, M)
 
 lcpm.cutoff <- log2(10/M + 2/L)
 library(RColorBrewer)
-nsamples <- length(unique(group))
+nsamples <- length(unique(dge$samples$group))
 col <- brewer.pal(nsamples, "Paired")
 par(mfrow=c(1,2))
 plot(density(lcpm[,1]), col=col[1], lwd=2, ylim=c(0,0.26), las=2, main="", xlab="")
@@ -256,7 +303,7 @@ for (i in 2:nsamples){
   den <- density(lcpm[,i])
   lines(den$x, den$y, col=col[i], lwd=2)
 }
-legend("topright", as.character(unique(group)), text.col=col, bty="n")
+legend("topright", as.character(unique(dge$samples$group)), text.col=col, bty="n")
 lcpm <- edgeR::cpm(dge, log=TRUE)
 plot(density(lcpm[,1]), col=col[1], lwd=2, ylim=c(0,0.26), las=2, main="", xlab="")
 title(main="B. Filtered data", xlab="Log-cpm")
@@ -265,85 +312,281 @@ for (i in 2:nsamples){
   den <- density(lcpm[,i])
   lines(den$x, den$y, col=col[i], lwd=2)
 }
-legend("topright", as.character(unique(group)), text.col=col, bty="n")
+legend("topright", as.character(unique(dge$samples$group)), text.col=col, bty="n")
 ```
 
-# Normalising gene expression
-
-
-```{r}
-dge2 <- dge
-dge2$samples$norm.factors <- 1
-
-
-
-par(mfrow=c(1,2))
-lcpm <- edgeR::cpm(dge2, log=TRUE)
-boxplot(lcpm, las=2, col=col, main="")
-title(main="A. Example: Unnormalised data", ylab="Log-cpm")
-
-dge <- calcNormFactors(dge, method = "TMM")
-
-dge$samples$norm.factors
-## [1] 0.0577 6.0829 1.2202 1.1648 1.1966 1.0466 1.1505 1.2543 1.1090
-
-lcpm <- edgeR::cpm(dge, log=TRUE)
-boxplot(lcpm, las=2, col=col, main="")
-title(main="B. Example: Normalised data", ylab="Log-cpm")
-```
-
-```{r}
-apply(dge$counts, MARGIN = 2, FUN = function(x) {sum(x > 1)})
-
-```
-
-## Comparing library size between samples
+## Quality control
 
 ```{r}
 # Set colours for this data set
 group_colours <- setNames(
     ggthemes::tableau_color_pal("Tableau 10")(6), 
-    levels(group))
+    levels(dge$samples$group))
 
 batch_colours <- setNames(
     brewer.pal(8, "Dark2")[3:4], 
-    levels(batch))
+    levels(dge$samples$batch))
 
 treatment_colours <- setNames(
     brewer.pal(8, "Dark2")[1:2], 
-    levels(treatment))
+    levels(dge$samples$treatment))
 ```
 
+### Library size
+
+The bar charts below show the library sizes for each sample, coloured by sample, batch and treatment. 
+The samples from batch 2 have smaller library sizes on average than the batch 1 samples. 
+The sample `WT_2_B1` from batch 1 also has a small library size.
+
 ```{r, fig.asp = 1}
-levels(dge$samples$group) <- c("WT_2_B1", "WT_3_B1", "SOCS3_2_B1", "SOCS3_3_B1", "WT_1_B2", "SOCS3_1_B2")
+# this factor ordering for group is helpful for QC, as it puts everything from 
+# the same batch next to each other. 
+dge$samples$group <- factor(dge$samples$group,
+    levels = c("WT_2_B1", "WT_3_B1", "SOCS3_2_B1", "SOCS3_3_B1", "WT_1_B2", "SOCS3_1_B2"))
 
 p1 <- ggplot(data = dge$samples, mapping = aes(y = group, x = lib.size, fill = group)) + 
     geom_col() +
     scale_fill_manual(values = group_colours) +
+    scale_y_discrete(limits = rev(levels(dge$samples$group))) +
     theme_minimal()
 p2 <- ggplot(data = dge$samples, mapping = aes(y = group, x = lib.size, fill = batch)) + 
     geom_col() +
     scale_fill_manual(values = batch_colours) +
+    scale_y_discrete(limits = rev(levels(dge$samples$group))) +
     theme_minimal()
 p3 <- ggplot(data = dge$samples, mapping = aes(y = group, x = lib.size, fill = treatment)) + 
     geom_col() +
     scale_fill_manual(values = treatment_colours) + 
+    scale_y_discrete(limits = rev(levels(dge$samples$group))) +
     theme_minimal()
-p1 / p2 / p3
+(p1 / p2 / p3) + plot_layout(guides = "collect")
 ```
 
-MDS plot with the library size overlayed on the samples shows that the samples from batch 2 have a much lower library size than the samples from batch 1. 
-It also shows that the sample which does not follow the trend observed for the treatment has a low library size, so this may be due to low quality samples. 
+We can also look at some other experimental variables that could explain the different library sizes. 
+The bar charts below are coloured by the number of mice used, and the concentration of RNA.
+Since the batch 2 samples only had one mice each, this could explain the lower library size for these samples. 
+The concentration also has a moderate correlation with the library size.
+
+```{r, include = FALSE}
+dge$samples
+```
+
+```{r}
+stopifnot(identical(colnames(dge), c("WT_1_B2", "SOCS3_1_B2", "SOCS3_2_B1", "SOCS3_3_B1", "WT_2_B1", "WT_3_B1")))
+dge$samples$nMice <- factor(c(1, 1, 3, 2, 3, 2))
+```
+
+```{r, fig.asp = 1}
+p1 <- ggplot(data = dge$samples, mapping = aes(y = group, x = lib.size, fill = group)) + 
+    geom_col() +
+    scale_fill_manual(values = group_colours) +
+    scale_y_discrete(limits = rev(levels(dge$samples$group))) +
+    theme_minimal()
+p2 <- ggplot(data = dge$samples, mapping = aes(y = group, x = lib.size, fill = nMice)) + 
+  geom_col() +
+  scale_y_discrete(limits = rev(levels(dge$samples$group))) +
+  scale_fill_manual(
+    values = c("1" = "#6a51a3", "2" = "#c09be6", "3" = "#f2e5ff"),
+    name = "Number of Mice"
+  ) +
+  theme_minimal()
+p3 <- ggplot(data = dge$samples, mapping = aes(y = group, x = lib.size, fill = Concentration)) + 
+    geom_col() +
+    scale_y_discrete(limits = rev(levels(dge$samples$group))) +
+    theme_minimal()
+(p1 / p2 / p3) + plot_layout(guides = "collect")
+```
+
+```{r, include = FALSE}
+plot(dge$samples$Concentration, dge$samples$lib.size)
+cor(dge$samples$Concentration, dge$samples$lib.size)
+```
+
+```{r}
+library(ggpubr)
+
+ggplot(dge$samples, aes(x = Concentration, y = lib.size)) +
+  geom_point() +
+  stat_cor(method = "pearson") +
+  theme_light()
+```
+
+
+### Number of expressed features
+
+Expressed features are defined as those with at least one count in a sample. 
+There is a similar number of expressed features in each sample. 
+Each sample has around 20,000 genes with at least one count. 
+
+```{r}
+dge$samples$nFeatures <- apply(dge$counts, MARGIN = 2, FUN = function(x) {sum(x > 0)})
+
+dge$samples |>
+    dplyr::select(group, nFeatures) |>
+    knitr::kable()
+```
+
+```{r, fig.asp = 1, include = FALSE}
+# No trends here
+p1 <- ggplot(data = dge$samples, mapping = aes(y = group, x = nFeatures, fill = group)) + 
+    geom_col() +
+    scale_fill_manual(values = group_colours) +
+    scale_y_discrete(limits = rev(levels(dge$samples$group))) +
+    theme_minimal()
+p2 <- ggplot(data = dge$samples, mapping = aes(y = group, x = nFeatures, fill = batch)) + 
+    geom_col() +
+    scale_fill_manual(values = batch_colours) +
+    scale_y_discrete(limits = rev(levels(dge$samples$group))) +
+    theme_minimal()
+p3 <- ggplot(data = dge$samples, mapping = aes(y = group, x = nFeatures, fill = treatment)) + 
+    geom_col() +
+    scale_fill_manual(values = treatment_colours) + 
+    scale_y_discrete(limits = rev(levels(dge$samples$group))) +
+    theme_minimal()
+(p1 / p2 / p3) + plot_layout(guides = "collect")
+```
+
+###  Proportion of mitochondrial genes
+
+```{r}
+table(dge$genes$CHR)
+```
+
+```{r}
+mito_set <- rownames(dge$genes)[dge$genes$CHR == "MT"]
+```
+
+We can identify mitochondrial genes as genes with the chromosome number "MT". 
+There are `r length(mito_set)` mitochondrial genes. 
+
+```{r, include = FALSE}
+# This is the library size. 
+sum(dge$counts[, 1])
+
+# This is the counts for mitochondrial genes
+sum(dge$counts[mito_set, 1])
+
+# Mitochondrial RNA proportion:
+sum(dge$counts[mito_set, 1]) / sum(dge$counts[, 1])
+```
+
+The chunk below works out the proportion of counts in each sample which are mitochondrial. 
+High proportions of mitochondrial RNA can indicate that the cells in the sample are under stress. 
+In this case, the proportion is very low (0.5-1.5%), which is good. 
+There is however noticeably higher percentages in the batch2 data.
+There is no trend between treatment and mitochondrial proportion, which is good. 
+
+```{r}
+# Apply to each sample
+dge$samples$mito_pct <- apply(dge$counts, MARGIN = 2, FUN = function(x) {sum(x[mito_set]) / sum(x)})
+
+dge$samples |>
+    dplyr::select(group, mito_pct) |>
+    janitor::adorn_pct_formatting() |>
+    knitr::kable() 
+```
+
+```{r, fig.asp = 1}
+library(scales)
+
+# No trends here
+p1 <- ggplot(data = dge$samples, mapping = aes(y = group, x = mito_pct, fill = group)) + 
+    geom_col() +
+    scale_fill_manual(values = group_colours) +
+    scale_x_continuous(labels = label_percent()) +
+    scale_y_discrete(limits = rev(levels(dge$samples$group))) +
+    theme_minimal()
+p2 <- ggplot(data = dge$samples, mapping = aes(y = group, x = mito_pct, fill = batch)) + 
+    geom_col() +
+    scale_fill_manual(values = batch_colours) +
+    scale_x_continuous(labels = label_percent()) +
+    scale_y_discrete(limits = rev(levels(dge$samples$group))) +
+    theme_minimal()
+p3 <- ggplot(data = dge$samples, mapping = aes(y = group, x = mito_pct, fill = treatment)) + 
+    geom_col() +
+    scale_fill_manual(values = treatment_colours) + 
+    scale_x_continuous(labels = label_percent()) +
+    scale_y_discrete(limits = rev(levels(dge$samples$group))) +
+    theme_minimal()
+(p1 / p2 / p3) + plot_layout(guides = "collect")
+```
+
+## Normalisation
+
+The impact of normalisation is subtle. 
+Most notably, the third quartiles have been brought into alignment. 
+
+```{r}
+dge_raw <- dge
+dge <- calcNormFactors(dge, method = "TMM")
+```
+
+The library sizes for the samples are listed in the table below. 
+This is the sum of counts across every gene for each sample. 
+The counts in the Hisat2 analysis were roughly 10 million per sample, and the kallisto analysis has about 60 million counts per sample. 
+Possibly this is due to the way each method handles PCR duplicates as well as some reads not mapping in the hisat2 version.
+
+```{r}
+# Library sizes
+dge_raw$sample |> 
+    dplyr::select(lib.size) |>
+    knitr::kable(col.names = c("Sample", "Library size"))
+```
+
+```{r, include = FALSE}
+# Norm factors
+dge_raw$samples$norm.factors
+dge$samples$norm.factors
+```
+
+```{r}
+# log-cpm in appropriate order for plot
+# NOTE: NEVER USE WITH dge$samples!!! For plotting only!!
+lcpm_raw_plot <- edgeR::cpm(dge_raw, log=TRUE)[, levels(dge_raw$samples$group)]
+lcpm_plot <- edgeR::cpm(dge, log = TRUE)[, levels(dge$samples$group)]
+
+# y-limit for plot 
+ylims <- range(c(lcpm_raw_plot, lcpm_plot))
+par(mfrow=c(1,2))
+
+boxplot(lcpm_raw_plot, las=2, col=col, main="", )
+title(main="A. Example: Unnormalised data", ylab="Log-cpm")
+
+boxplot(lcpm_plot, las=2, col=col, main="")
+title(main="B. Example: Normalised data", ylab="Log-cpm")
+```
+
+The plots below show the MDS plot before and after normalisation.
+This has a more obvious difference than the boxplot above.
+
+```{r, fig.asp = 1/2}
+par(mfrow = c(1,2))
+plotMDS(dge_raw, main="Before normalization", col=batch_colours[dge_raw$samples$batch])
+plotMDS(dge, main="After normalization", col=batch_colours[dge$samples$batch])
+```
+
+After normalising the data, we need to evaluate the log counts again. 
+
+```{r}
+cpm <- edgeR::cpm(dge)
+lcpm <- edgeR::cpm(dge, log=TRUE)
+```
+
+
+# Visualising the data
+
+MDS plot with the library size overlayed on the samples shows that the samples from batch 2 have lower library sizes than the samples from batch 1. 
+The sample `WT_2_B1` clusters in the centre of the data which may indicate that it has different expression profiles to both the WT and SOCS3 samples. It also has a low library size. 
 
 ```{r, fig.asp=1}
 par(mfrow = c(2,2))
-plotMDS(lcpm, labels=group, col=group_colours[group])
+plotMDS(lcpm, labels=dge$samples$group, col=group_colours[dge$samples$group])
 title(main="A. Sample groups")
 
-plotMDS(lcpm, labels=treatment, col=treatment_colours[treatment])
+plotMDS(lcpm, labels=dge$samples$treatment, col=treatment_colours[dge$samples$treatment])
 title(main="B. Treatment")
 
-plotMDS(lcpm, labels=batch, col=batch_colours[batch])
+plotMDS(lcpm, labels=dge$samples$batch, col=batch_colours[dge$samples$batch])
 title(main="C. Batch")
 
 # MDS plot with library size
@@ -359,40 +602,12 @@ plotMDS(lcpm, labels=NULL, pch = 16, cex = 4, col=point_colors)
 title(main="D. Library Size") 
 ```
 
-```{r, fig.asp=1}
-
-dge2 <- dge[,dge$samples$group != "WT_2_B1"]
-dge2$samples <- dge$samples[dge$samples$group != "WT_2_B1",]
-
-
-lcpm2 <- lcpm[, c(1, 2, 3, 4, 6)]
-
-par(mfrow = c(2,2))
-plotMDS(lcpm2, labels=colnames(lcpm2), col=group_colours[colnames(lcpm2)])
-title(main="A. Sample groups")
-
-plotMDS(lcpm2, labels=dge2$samples$treatment, col=treatment_colours[dge2$samples$treatment])
-title(main="B. Treatment")
-
-plotMDS(lcpm2, labels=dge2$samples$batch, col=batch_colours[dge2$samples$batch])
-title(main="C. Batch")
-
-# MDS plot with library size
-libsizes2 <- dge2$samples$lib.size
-
-# Create a viridis color function
-color_func <- scales::col_numeric(viridis::viridis(100), domain = range(libsizes2))
-
-# Assign colors according to library sizes
-point_colors2 <- color_func(libsizes2)
-
-plotMDS(lcpm2, labels=NULL, pch = 16, cex = 4, col=point_colors2)
-title(main="D. Library Size") 
-```
-
-
-
 ## Comparing batches for genes of interest
+
+The plots below show the expression of three of our genes of interest. 
+Based on a priori knowledge, the SOCS3 knockout samples should express Socs1 and Socs3 less than the WT. 
+Bcl3 should be higher in the SOCS3 group. 
+The difference in these 6 samples is small and will not come out as significant in DE testing. 
 
 ```{r, fig.asp = 3/8}
 genes_of_interest <- c("Socs3", "Socs1", "Bcl3")
@@ -424,7 +639,7 @@ for (i in 1:3) {
             ggtitle(label = paste0(genes_of_interest[i])
     )
 }
-patchwork::wrap_plots(plot_list, ncol = 3, guides = "collect") 
+patchwork::wrap_plots(plot_list, ncol = 3, guides = "collect")
 ```
 
 ```{r}
@@ -433,14 +648,21 @@ lcpm[selected_genes, ] |>
     as.data.frame() |>
     tibble::rownames_to_column("ENSEMBL") |>
     dplyr::mutate(SYMBOL = dge$genes$SYMBOL[selected_genes], .after = "ENSEMBL")
-
 ```
 
+# Differential Expression Analyses
 
-# DE
+We have `r nrow(dge)` genes which we are testing for cha... 
+It is very important to use a multiple testing correction such as the False Discovery Rate (FDR) to account for the high number of discoveries which would occur by chance even if there were no differences between the two treatments.  
+
+
+## Treatment with limma::voom method
+
+Since there is a strong batch effect, we will include batch as a covariate in the differential expression analysis. 
+The analysis below uses the `limma::voom()` method for differential expression testing.
 
 ```{r}
-design <- model.matrix(~0+treatment+batch)
+design <- model.matrix(~0+treatment+batch, data = dge$samples)
 
 colnames(design) <- gsub("treatment|batch", "", colnames(design))
 
@@ -459,36 +681,127 @@ vfit <- contrasts.fit(vfit, contrasts=contr.matrix)
 efit <- eBayes(vfit)
 plotSA(efit)
 
-summary(decideTests(efit))
+de_results <- decideTests(efit)
+```
 
-tfit <- treat(vfit, lfc=0.1)
-de_results <- decideTests(tfit)
+There is only one DE gene, and it is the immunoglobulin gene `r topTable(efit, n=1)$SYMBOL`. 
+The top 20 genes (ranked by multiple-testing adjusted p-value) also includes some other Ig genes. 
+
+These genes are related to B-cells, and often indicate contamination from immune cells. 
+Assess if it makes sense biologically to see less immunoglobulin expression in the Socs3 samples.
+
+```{r}
 summary(de_results)
-
-
-head(tfit$genes$SYMBOL[de_results != 0], n=20)
-
-
-dir.create(here("output/DE"), recursive = TRUE)
-write.fit(tfit, de_results, file=here("output/DE/DE_lane_model.txt"))
 ```
 
 ```{r}
-# View the differential expression results for our genes of interest, as a sanity check. 
-de_table <- topTable(efit, n = Inf)
+# Sort the top table by adjusted P value
+de_table <- topTable(efit, number=Inf, sort.by="P")
+sorted_de <- de_table[order(de_table$adj.P.Val), ]
 
+head(sorted_de, n=20)
+
+# Write to a file
+dir.create(here("output/DEGs/kallisto_analysis"), recursive = TRUE)
+write.table(sorted_de, file=here("output/DEGs/kallisto_analysis/kallisto_treatment_voom.tsv"),
+            sep="\t", quote=FALSE, row.names=FALSE)
+```
+
+A table of the differential expression results are saved in `output/DEGs/kallisto_analysis/kallisto_treatment_voom.tsv`.
+The rows are sorted so the genes with the lowest adjusted p-value (FDR) are at the top. 
+
+The results of testing for our genes of interest are shown below. 
+
+```{r}
 # Results for the genes of interest are not significant
-de_table[de_table$SYMBOL %in% genes_of_interest, ]
+sorted_de[sorted_de$SYMBOL %in% genes_of_interest, ]
+```
 
+### Plots of the most differentially expressed genes
+
+Plots of the most differentially expressed genes to see if the test is doing what we want it to do. 
+There are several Ig genes here, and a collagen gene.
+
+```{r, fig.asp = 3/4}
+top_genes <- head(rownames(sorted_de), n = 6)
+
+selected_genes <- match(top_genes, rownames(dge))
+
+df <- data.frame(
+    y = t(lcpm[selected_genes, ]), 
+    treatment = dge$samples$treatment, 
+    batch = dge$samples$batch)
+
+colnames(df)[1:length(top_genes)] <- rownames(dge)[selected_genes]
+
+df$labels <- factor(paste0(df$batch, ".", df$treatment),
+    levels=c("B1.WT", "B1.SOCS3", "B2.WT", "B2.SOCS3"))
+
+plot_list <- list()
+for (i in 1:length(top_genes)) {
+    plot_list[[i]] <-
+        ggplot(data = df, mapping = aes(x = labels, y = .data[[top_genes[i]]], group = labels, colour = treatment)) + 
+            geom_point(size = 4) + 
+            theme_minimal() + 
+            theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+            ylab("Expression (log CPM)") + 
+            scale_colour_manual(values = treatment_colours) +
+            ggtitle(label = paste0(top_genes[i])
+    )
+}
+patchwork::wrap_plots(plot_list, ncol = 3, guides = "collect") 
+
+# Corresponds to:
+head(de_table, n = 6)
+```
+
+The top 20 differentially expressed genes using voom are shown below.
+
+```{r}
+# Top 20 genes
+head(rownames(sorted_de), n=20)
 ```
 
 
+## Treatment with edgeR::LRT method
 
-## Plots of the most differentially expressed genes
+```{r}
+design <- model.matrix(~ treatment + batch, data=dge$samples) 
+dge <- estimateDisp(dge, design) 
+fit <- glmFit(dge, design) 
+lrt <- glmLRT(fit, coef = 2) 
 
-Plots of the most differentially expressed genes to see if the test is doing what we want it to do. 
+# Find significant genes
+de_results <- decideTests(lrt, adjust.method = "BH", p.value = 0.05)
+summary(de_results)
+```
 
-```{r, fig.asp = 1}
+Using `glmLRT` there are `r summary(de_results)[1]` genes which are downregulated in SOCS3, and `r summary(de_results)[3]` which are upregulated.
+
+```{r, fig.asp = 2/3}
+# MD plot
+plotMD(lrt, status = de_results, values = c(-1, 1), col = c("blue", "red"), legend = "topright", main = "SOCS3 vs. WT")
+```
+
+```{r}
+de_table <- topTags(lrt, n = Inf)$table 
+head(de_table) 
+
+head(rownames(de_table), 20)
+```
+
+```{r}
+# See the values of the DE for genes of interest
+genes_of_interest <- c("Socs3", "Socs1", "Bcl3")
+
+de_table[de_table$SYMBOL %in% genes_of_interest, ]
+```
+
+The LRT test also returns a number of Ig genes. 
+
+### Plots of the most differentially expressed genes
+
+```{r, fig.asp = 3/4}
 top_genes <- head(rownames(de_table), n = 6)
 
 selected_genes <- match(top_genes, rownames(dge))
@@ -521,54 +834,100 @@ patchwork::wrap_plots(plot_list, ncol = 3, guides = "collect")
 head(de_table, n = 6)
 ```
 
+The heatmap below shows the top 50 genes with the highest differential expression.
+This is not the cleanest heatmap, with many genes which are only expressed highly in one of the three samples for a given treatment. 
+In other words, many of the effects are driven by strong signals from one sample, rather than consistent differences across all three samples for a condition. 
+The wild-type samples have higher expression of many Ig genes, while the Socs3 samples have higher expression of genes such as the mitochondrial gene `mt-Co2` and the collagen gene `Col18a1`.
 
+```{r, fig.asp=1}
+# Filter top 50 DE genes with FDR < 0.05
+de_table_sig <- de_table[de_table$FDR < 0.05, ]
+top50_genes <- rownames(head(de_table_sig, 50))
 
+# Log2 CPM-normalized expression matrix
+lcpm_top50 <- lcpm[top50_genes, ]
 
-# DE with aggregating over lanes
+# Sample annotations: Treatment and Batch
+annotation_col <- dge$samples[, c("treatment", "batch")]
 
-```{r}
-design <- model.matrix(~0+treatment+batch)
+# Z-score normalize rows (genes)
+lcpm_scaled <- t(scale(t(lcpm_top50)))
 
-colnames(design) <- gsub("treatment|batch", "", colnames(design))
-design
-
-contr.matrix <- makeContrasts(
-   SOCS3vsWT = SOCS3 - WT,
-   levels = colnames(design))
-contr.matrix
-
-
-v <- voom(dge, design, plot=TRUE)
-
-
-vfit <- lmFit(v, design)
-vfit <- contrasts.fit(vfit, contrasts=contr.matrix)
-
-efit <- eBayes(vfit)
-plotSA(efit)
-
-summary(decideTests(efit))
-
-
-tfit <- treat(vfit, lfc=0.1)
-de_results <- decideTests(tfit)
-summary(de_results)
-
-
-head(tfit$genes$SYMBOL[de_results != 0], n=20)
-
-##  [1] "Xkr4"          "Rgs20"         "Cpa6"           "A830018L16Rik" "Sulf1"
-##  [6] "Eya1"          "Msc"           "Sbspon"         "Pi15"          "Crispld1"
-## [11] "Kcnq5"         "Rims1"         "Khdrbs2"        "Ptpn18"        "Prss39"
-## [16] "Arhgef4"       "Cnga3"         "2010300C02Rik"  "Aff3"          "Npas2"
-
-write.fit(tfit, de_results, file=here("output/DE/DE_aggregate_over_lane.txt"))
+# Plot heatmap
+pheatmap(lcpm_scaled,
+         annotation_col = annotation_col,
+         annotation_colors = list(
+             batch = batch_colours,
+             treatment = treatment_colours),
+         show_rownames = TRUE,
+         show_colnames = FALSE,
+         cluster_cols = TRUE,
+         clustering_distance_rows = "euclidean",
+         clustering_distance_cols = "euclidean",
+         clustering_method = "complete",
+         fontsize_row = 6,
+         main = "Top DE genes for treatment using edgeR LRT \n (Uncorrected)")
 ```
 
-# DE of batch
+The heatmap below uses `limma::removeBatchEffect` to improve the visualisation. Note that the statistical test has not changed, this is just adjusting the values for plotting. 
+
+```{r, fig.asp=1}
+# Filter top 50 DE genes with FDR < 0.05
+de_table_sig <- de_table[de_table$FDR < 0.05, ]
+top50_genes <- rownames(head(de_table_sig, 50))
+
+
+# Remove batch effect from logCPM for plotting
+lcpm_corrected <- removeBatchEffect(lcpm, batch=dge$samples$batch)
+
+# Log2 CPM-normalized expression matrix
+lcpm_top50 <- lcpm_corrected[top50_genes, ]
+
+# Sample annotations: Treatment and Batch
+annotation_col <- dge$samples[, c("treatment", "batch")]
+
+# Z-score normalize rows (genes)
+lcpm_scaled <- t(scale(t(lcpm_top50)))
+
+# Plot heatmap
+pheatmap(lcpm_scaled,
+         annotation_col = annotation_col,
+         annotation_colors = list(
+             batch = batch_colours,
+             treatment = treatment_colours),
+         show_rownames = TRUE,
+         show_colnames = FALSE,
+         cluster_cols = TRUE,
+         clustering_distance_rows = "euclidean",
+         clustering_distance_cols = "euclidean",
+         clustering_method = "complete",
+         fontsize_row = 6,
+         main = "Top DE genes for treatment using edgeR LRT \n (Corrected)")
+```
+
 
 ```{r}
-design <- model.matrix(~0+batch)
+# The LRT de_results object is already sorted by FDR.
+
+# Write to a file
+dir.create(here("output/DEGs/kallisto_analysis"), recursive = TRUE)
+write.table(de_table, file=here("output/DEGs/kallisto_analysis/kallisto_treatment_LRT.tsv"),
+            sep="\t", quote=FALSE, row.names=FALSE)
+```
+
+A table of the differential expression results are saved in `output/DEGs/kallisto_analysis/kallisto_treatment_LRT.tsv`.
+The rows are sorted so the genes with the lowest FDR are at the top. 
+
+
+## Batch with limma::voom method
+
+There is a strong batch effect in this data set.
+In this section, I perform a DE test of *just batch*. 
+This shows the genes that are upregulated in one batch but not the other, and are purely technical effects. 
+
+
+```{r}
+design <- model.matrix(~0+batch+treatment, data = dge$samples)
 
 colnames(design) <- gsub("batch", "", colnames(design))
 design
@@ -587,49 +946,51 @@ vfit <- contrasts.fit(vfit, contrasts=contr.matrix)
 
 efit <- eBayes(vfit)
 plotSA(efit)
+```
 
-summary(decideTests(efit))
+There are hundreds of genes in each direction which are significant when testing differences between batch 1 and batch 2. 
 
-
+```{r}
 tfit <- treat(vfit, lfc=0.1)
 de_results <- decideTests(tfit)
 summary(de_results)
 
+# Sort the top table by adjusted P value
+de_table <- topTable(tfit, number=Inf, sort.by="P")
 
-head(tfit$genes$SYMBOL[de_results != 0], n=20)
+head(rownames(de_table), n=20)
 
-##  [1] "Xkr4"          "Rgs20"         "Cpa6"           "A830018L16Rik" "Sulf1"
-##  [6] "Eya1"          "Msc"           "Sbspon"         "Pi15"          "Crispld1"
-## [11] "Kcnq5"         "Rims1"         "Khdrbs2"        "Ptpn18"        "Prss39"
-## [16] "Arhgef4"       "Cnga3"         "2010300C02Rik"  "Aff3"          "Npas2"
+sorted_de <- de_table[order(de_table$adj.P.Val), ]
 
-write.fit(tfit, de_results, file=here("output/DE/DE_aggregate_over_lane.txt"))
+# Write to a file
+dir.create(here("output/DEGs/batch_effect"), recursive = TRUE)
+write.table(sorted_de, file=here("output/DEGs/batch_effect/kallisto_batch_voom.tsv"),
+            sep="\t", quote=FALSE, row.names=FALSE)
 ```
 
 
 ```{r, fig.asp=1}
-library(pheatmap)
-
 # Filter DE genes with FDR < 0.05
-de_genes <- topTable(efit, coef = "B2vsB1", number = Inf)
-de_genes_sig <- de_genes[de_genes$adj.P.Val < 0.05, ]
+de_table_sig <- de_table[de_table$adj.P.Val < 0.05, ]
 
 # Select top 50 DE genes by smallest FDR
-top50_genes <- head(rownames(de_genes_sig), 50)
+top50_genes <- head(rownames(de_table_sig), 50)
 
 # Use voom-transformed expression matrix
 expr_mat <- v$E[top50_genes, ]
 
-# Sample annotations: Treatment and Batch
+# Sample annotations
 annotation_col <- dge$samples[, c("batch", "treatment")]
-colnames(annotation_col) <- c("Batch", "Treatment")
 
 # Z-score normalize rows (genes)
-log_cpm_scaled <- t(scale(t(expr_mat)))
+lcpm_scaled <- t(scale(t(expr_mat)))
 
 # Plot heatmap
-pheatmap(log_cpm_scaled,
+pheatmap(lcpm_scaled,
          annotation_col = annotation_col,
+         annotation_colors = list(
+             batch = batch_colours,
+             treatment = treatment_colours),
          show_rownames = TRUE,
          show_colnames = FALSE,
          cluster_cols = FALSE,
@@ -637,60 +998,48 @@ pheatmap(log_cpm_scaled,
          clustering_distance_cols = "euclidean",
          clustering_method = "complete",
          fontsize_row = 6,
-         main = "Top 50 DE Genes (FDR < 0.05, edgeR LRT)")
+         main = "Top DE genes for batch using voom")
 
 ```
 
+## DE if we remove WT_2_B1
 
-```{r, fig.asp = 1/2}
-genes_of_interest <- c("Socs3", "Socs1", "Bcl3")
-selected_genes <- grep(glue::glue_collapse(genes_of_interest, "|"), dge$genes$SYMBOL)
+This analysis uses the `limma::voom` method. 
+We remove the problematic sample in the batch 1 group and reprocess the data. 
+MDS plots of the data without this sample are shown below. 
 
-cpm <- edgeR::cpm(dge)
-lcpm <- edgeR::cpm(dge, log=TRUE)
-df <- data.frame(
-    y = t(lcpm[selected_genes, ]), 
-    treatment = dge$samples$treatment, 
-    batch = dge$samples$batch)
+```{r, fig.asp=1}
+dge2 <- dge[, dge$samples$group != "WT_2_B1"]
 
-# NOTE: The order of the columns corresponds to the order of these genes in the 
-#   rownames, NOT the order that was listed in genes_of_interest.
-colnames(df)[1:3] <- gsub("y.", "", colnames(df)[1:3])
+lcpm2 <- edgeR::cpm(dge2, log = TRUE)
 
-df$labels <- factor(paste0(df$batch, ".", df$treatment),
-    levels=c("B1.WT", "B1.SOCS3", "B2.WT", "B2.SOCS3"))
+par(mfrow = c(2,2))
+plotMDS(lcpm2, labels=colnames(lcpm2), col=group_colours[colnames(lcpm2)])
+title(main="A. Sample groups")
 
-plot_list <- list()
-for (i in 1:3) {
-    plot_list[[i]] <-
-        ggplot(data = df, mapping = aes(x = labels, y = .data[[genes_of_interest[i]]], group = labels, colour = treatment)) + 
-            geom_point(size = 4) + 
-            theme_minimal() + 
-            theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
-            ylab("Expression (log CPM)") + 
-            scale_colour_manual(values = treatment_colours) +
-            ggtitle(label = paste0(genes_of_interest[i])
-    )
-}
-patchwork::wrap_plots(plot_list, ncol = 3, guides = "collect") 
+plotMDS(lcpm2, labels=dge2$samples$treatment, col=treatment_colours[dge2$samples$treatment])
+title(main="B. Treatment")
+
+plotMDS(lcpm2, labels=dge2$samples$batch, col=batch_colours[dge2$samples$batch])
+title(main="C. Batch")
+
+# MDS plot with library size
+libsizes2 <- dge2$samples$lib.size
+
+# Create a viridis color function
+color_func <- scales::col_numeric(viridis::viridis(100), domain = range(libsizes2))
+
+# Assign colors according to library sizes
+point_colors2 <- color_func(libsizes2)
+
+plotMDS(lcpm2, labels=NULL, pch = 16, cex = 4, col=point_colors2)
+title(main="D. Library Size") 
 ```
 
 ```{r}
-# Table format
-lcpm[selected_genes, ] |>
-    as.data.frame() |>
-    tibble::rownames_to_column("ENSEMBL") |>
-    dplyr::mutate(SYMBOL = dge$genes$SYMBOL[selected_genes], .after = "ENSEMBL")
-
-```
-
-# DE with aggregating over lanes
-
-```{r}
-design <- model.matrix(~0+treatment+batch, data=dge$samples)
+design <- model.matrix(~0+treatment+batch, data = dge2$samples)
 
 colnames(design) <- gsub("treatment|batch", "", colnames(design))
-design
 
 contr.matrix <- makeContrasts(
    SOCS3vsWT = SOCS3 - WT,
@@ -698,7 +1047,7 @@ contr.matrix <- makeContrasts(
 contr.matrix
 
 
-v <- voom(dge, design, plot=TRUE)
+v <- voom(dge2, design, plot=TRUE)
 
 
 vfit <- lmFit(v, design)
@@ -707,127 +1056,64 @@ vfit <- contrasts.fit(vfit, contrasts=contr.matrix)
 efit <- eBayes(vfit)
 plotSA(efit)
 
-summary(decideTests(efit))
-
 tfit <- treat(vfit, lfc=0.1)
 de_results <- decideTests(tfit)
 summary(de_results)
-
-
-head(tfit$genes$SYMBOL[de_results != 0], n=20)
-
-
-write.fit(tfit, de_results, file=here("output/DE/DE_aggregated.txt"))
 ```
 
-# Slightly different way of doing DE
-
-
-## DE with batch
-
+There are 11 genes which are more highly expressed in the controls. 
+The "Ig" genes and "Jchain" are related to B-cells and plasma cells.
 
 ```{r}
-design <- model.matrix(~ treatment + batch) 
-dge <- estimateDisp(dge, design) 
-fit <- glmFit(dge, design) 
-lrt <- glmLRT(fit, coef = 2) 
-de_results <- topTags(lrt, n = Inf)$table 
-head(de_results) 
+# Sort the top table by adjusted P value
+sorted_de <- topTable(tfit, number=Inf, sort.by="P")
+sorted_de <- sorted_de[order(sorted_de$adj.P.Val), ]
 
-# Number of DE genes
-nrow(de_results[de_results$FDR < 0.05, ])
+head(rownames(sorted_de), n=20)
 
-# See the values of the DE for genes of interest
-genes_of_interest <- c("Socs3", "Socs1", "Bcl3")
-
-de_results[de_results$SYMBOL %in% genes_of_interest, ]
+# Write to a file
+write.table(sorted_de, file=here("output/DEGs/kallisto_analysis/kallisto_5samples_treatment_voom.tsv"),
+            sep="\t", quote=FALSE, row.names=FALSE)
 ```
 
+
+## DE with random treatment labels
+
+If we randomly permute the treatment labels, i.e., intentionally mess up our data, what does the LRT test look like?
+This section uses `limma::voom()`. 
 
 ```{r}
-design <- model.matrix(~ treatment) 
-dge <- estimateDisp(dge, design) 
-fit <- glmFit(dge, design) 
-lrt <- glmLRT(fit, coef = 2) 
-de_results <- topTags(lrt, n = Inf)$table 
-head(de_results) 
-
-# Number of DE genes
-nrow(de_results[de_results$FDR < 0.05, ])
-
-# See the values of the DE for genes of interest
-genes_of_interest <- c("Socs3", "Socs1", "Bcl3")
-
-de_results[de_results$SYMBOL %in% genes_of_interest, ]
-```
-
-
-```{r, fig.asp = 1}
-top_genes <- head(rownames(de_table), n = 6)
-
-selected_genes <- match(top_genes, rownames(dge))
-
-df <- data.frame(
-    y = t(lcpm[selected_genes, ]), 
-    treatment = dge$samples$treatment, 
-    batch = dge$samples$batch)
-
-colnames(df)[1:length(top_genes)] <- rownames(dge)[selected_genes]
-
-df$labels <- factor(paste0(df$batch, ".", df$treatment),
-    levels=c("B1.WT", "B1.SOCS3", "B2.WT", "B2.SOCS3"))
-
-plot_list <- list()
-for (i in 1:length(top_genes)) {
-    plot_list[[i]] <-
-        ggplot(data = df, mapping = aes(x = labels, y = .data[[top_genes[i]]], group = labels, colour = treatment)) + 
-            geom_point(size = 4) + 
-            theme_minimal() + 
-            theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
-            ylab("Expression (log CPM)") + 
-            scale_colour_manual(values = treatment_colours) +
-            ggtitle(label = paste0(top_genes[i])
-    )
-}
-patchwork::wrap_plots(plot_list, ncol = 3, guides = "collect") 
-
-# Corresponds to:
-head(de_results, n = 6)
-```
-
-
-```{r, fig.asp=1}
-library(pheatmap)
-
-# Filter top 50 DE genes with FDR < 0.05
-de_genes_sig <- de_results[de_results$FDR < 0.05, ]
-top50_genes <- rownames(head(de_genes_sig, 50))
-
-# Log2 CPM-normalized expression matrix
-log_cpm <- edgeR::cpm(dge, log = TRUE)[top50_genes, ]
-
-# Sample annotations: Treatment and Batch
-annotation_col <- dge$samples[, c("treatment", "batch")]
-colnames(annotation_col) <- c("Treatment", "Batch")
-
-# Z-score normalize rows (genes)
-log_cpm_scaled <- t(scale(t(log_cpm)))
-
-# Plot heatmap
-pheatmap(log_cpm_scaled,
-         annotation_col = annotation_col,
-         show_rownames = TRUE,
-         show_colnames = FALSE,
-         cluster_cols = TRUE,
-         clustering_distance_rows = "euclidean",
-         clustering_distance_cols = "euclidean",
-         clustering_method = "complete",
-         fontsize_row = 6,
-         main = "Top 50 DE Genes (FDR < 0.05, edgeR LRT)")
-
+set.seed(123)
 ```
 
 ```{r}
-write.csv(de_results, file=here("output/DE/DE_LRT_batch.csv"), row.names = TRUE) 
+# Copy the object
+dge_ <- dge
+
+# Shuffle treatment labels
+dge_$samples$treatment <- sample(dge_$samples$treatment)
+
+design_ <- model.matrix(~ treatment + batch, data = dge_$samples) 
+dge_ <- estimateDisp(dge_, design_) 
+fit_ <- glmFit(dge_, design_) 
+lrt_ <- glmLRT(fit_, coef = 2) 
+
+# Find significant genes
+de_results_ <- decideTests(lrt_, adjust.method = "BH", p.value = 0.05)
 ```
 
+There are far fewer DE genes in this case, which shows that our signal above is likely to be real. 
+
+```{r}
+summary(de_results_)
+
+de_table_ <- topTags(lrt_, n = Inf)$table 
+head(de_table_, n=20)
+```
+
+# Concluding remarks
+
+The [`output/DEGs/`](../output/DEG s/) directory contains CSV files summarising the differential expression results. The following are available on request:
+
+- Full CSV tables of any data presented.
+- PDF/PNG files of any static plots.
