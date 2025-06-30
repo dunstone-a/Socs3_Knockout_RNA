@@ -1,13 +1,16 @@
 ---
 title: "Analysis of Filtered output 3"
-output:
-  html_document: default
-  pdf_document: default
-  word_document: default
+author:
+  - name: Amelia Dunstone
+    url: https://github.com/dunstone-a
+    affiliation: St. Vincent's Institute of Medical Research
+    affiliation_url: https://gitlab.svi.edu.au/biocellgen-public
+  - name: Natalie Koh
+    affiliation: St. Vincent's Institute of Medical Research
 date: "`r Sys.Date()`"
-author: "Millie Dunstone and Natalie Koh"
-editor_options:
+editor_options: 
   chunk_output_type: console
+output: distill::distill_article
 ---
 
 ```{r setup, include=FALSE}
@@ -36,6 +39,9 @@ library(RColorBrewer)
 ```
 
 # Setting up the data
+
+This analysis uses the `filtered_output_3` data. 
+The pre-processing included cutadapt for trimming adapter sequences, trimmomatic, and hisat2 for alignment. 
 
 ## Reading in count data
 
@@ -92,14 +98,14 @@ gene_map <- AnnotationDbi::select(Mus.musculus, keys=geneid, columns=c("SYMBOL",
 
 # There are 63 duplicate IDs, for these use their Ensembl ID ... or just remove them?
 # Code to remove them:
-table(duplicated(gene_map$ENSEMBL))
+# table(duplicated(gene_map$ENSEMBL))
 gene_map$SYMBOL[duplicated(gene_map$ENSEMBL)] <- gene_map$ENSEMBL[duplicated(gene_map$ENSEMBL)]
 
 # For NA symbols, use the ensembl gene id
 gene_map$SYMBOL <- ifelse(is.na(gene_map$SYMBOL), gene_map$ENSEMBL, gene_map$SYMBOL) 
 dge$genes <- gene_map[match(rownames(dge), gene_map$ENSEMBL), ]
 
-head(dge$genes)
+# head(dge$genes)
 
 # Check that the gene information matches the ordering of the count matrix
 stopifnot(identical(rownames(dge), dge$genes$ENSEMBL))
@@ -115,22 +121,21 @@ cpm <- edgeR::cpm(dge)
 lcpm <- edgeR::cpm(dge, log = TRUE)
 ```
 
+The table below shows the number of non-zero counts there are for the `r nrow(dge)` genes in the data currently. 
+There are 4201 genes which aren't expressed in any samples, which will be removed from the data set. 
+
 ```{r}
-# There are no genes that are expressed in no samples
-table(rowSums(dge$counts == 0))
-# The smallest amount of counts for a gene is 1 across the 6 samples
-min(rowSums(dge$counts))
+table(rowSums(dge$counts > 0))
 
 keep.exprs <- filterByExpr(dge, group=dge$samples$group)
 dge <- dge[keep.exprs,, keep.lib.sizes=FALSE]
-dim(dge)
-# We have removed 140 genes using filterByExpr.
-# This function keeps genes with about 10 read counts or more in a minimum
-# number of samples.
-sum(keep.exprs == FALSE)
 
+
+# sum(keep.exprs == FALSE)
 # rowSums(dge$counts == 0)
 ```
+
+There are `r nrow(dge)` genes remaining, and `r sum(keep.exprs == FALSE)` genes were removed. 
 
 In the raw data, there is a spike of lowly expressed genes. 
 These are removed using the `filterByExpr` function. 
@@ -141,7 +146,6 @@ These are removed using the `filterByExpr` function.
 # M is the mean, L is the median
 L <- mean(dge$samples$lib.size) * 1e-6
 M <- median(dge$samples$lib.size) * 1e-6
-c(L, M)
 
 lcpm.cutoff <- log2(10/M + 2/L)
 nsamples <- ncol(dge)
@@ -183,9 +187,9 @@ treatment_colours <- setNames(
     levels(dge$samples$treatment))
 ```
 
-The barcharts below show the library sizes for each sample, coloured by sample, batch and treatment. 
+### Library size
 
-### Barchart of library size
+The barcharts below show the library sizes for each sample, coloured by sample, batch and treatment. 
 
 ```{r, fig.asp = 1}
 # this factor ordering for group is helpful for QC, as it puts everything from 
@@ -216,7 +220,7 @@ p3 <- ggplot(data = dge$samples, mapping = aes(y = group, x = lib.size, fill = t
 Expressed features are defined as those with at least one count in a sample. 
 There is a similar number of expressed features in each sample. 
 Note however that 13,000 is quite low and the usual amount would be closer to 20,000 genes. 
-
+This can be explained by the mapping strategy and pre-processing steps used for this data.
 
 ```{r}
 dge$samples$nFeatures <- apply(dge$counts, MARGIN = 2, FUN = function(x) {sum(x > 0)})
@@ -263,14 +267,25 @@ Most notably, the third quantiles have been brought into alignment.
 
 dge_raw <- dge
 dge <- calcNormFactors(dge, method = "TMM")
+```
 
+The library sizes for the samples are listed in the table below. 
+This is the sum of counts across every gene for that sample. 
+
+```{r}
 # Library sizes
-dge_raw$samples$lib.size
+dge_raw$sample |> 
+    dplyr::select(lib.size) |>
+    knitr::kable()
+```
 
+```{r, include = FALSE}
 # Norm factors
 dge_raw$samples$norm.factors
 dge$samples$norm.factors
+```
 
+```{r}
 # log-cpm in appropriate order for plot
 # NOTE: NEVER USE WITH dge$samples!!! For plotting only!!
 lcpm_raw_plot <- edgeR::cpm(dge_raw, log=TRUE)[, levels(dge_raw$samples$group)]
@@ -299,6 +314,7 @@ plotMDS(dge, main="After normalization", col=batch_colours[dge$samples$batch])
 After normalising the data, we need to evaluate the log counts again. 
 
 ```{r}
+cpm <- edgeR::cpm(dge)
 lcpm <- edgeR::cpm(dge, log=TRUE)
 ```
 
@@ -306,9 +322,10 @@ lcpm <- edgeR::cpm(dge, log=TRUE)
 
 A useful tool to visualise RNA-seq data is the multi-dimensional scaling (MDS) plot.
 This plot can show us which samples are more similar to each other, and can help to identify outlying or low quality samples. 
-The first dimension captures the most amount of information about the data, while the second dimension captures the next biggest proportion of variation. 
+The first dimension captures the largest amount of information about the data, while the second dimension captures the next biggest proportion of variation. 
 
 Things to look out for in this plot are:
+
 - Samples should cluster within the primary condition of interest, i.e., treatment. 
 - Technical replicates should lie very close to each other. 
 - The first dimension should explain treatment, and the second should explain batch. 
@@ -318,7 +335,7 @@ The second dimension shows some separation by treatment and library size.
 
 As the technical replicates have not clustered together, we cannot get DE for this data. 
 
-```{r}
+```{r, fig.asp=1}
 # NOTE: Even though it might seem like more typing, it is much better to use
 #   dge$samples$group than group. 
 #   It is very easy to have inconsistencies with labelling if not using the dge
@@ -348,7 +365,7 @@ title(main="D. Library Size")
 
 Plots showing genes of interest on MDS plot.
 
-```{r}
+```{r, fig.asp=1}
 par(mfrow = c(2,2))
 
 # Plot 3: Treatments 
@@ -441,6 +458,7 @@ patchwork::wrap_plots(plot_list, ncol = 3, guides = "collect")
 # Differential Expression Analyses
 
 Since there is a strong batch effect, we will include batch as a covariate in the differential expression analysis. 
+The analysis below uses the `limma::voom()` method for differential expression testing.  
 
 ```{r}
 design <- model.matrix(~0+treatment+batch, data = dge$samples)
@@ -465,12 +483,27 @@ efit <- eBayes(vfit)
 plotSA(efit)
 
 de_results <- decideTests(efit, adjust.method = "fdr")
-summary(de_results)
+```
 
+The DE results don't include any significant genes.
+
+```{r}
+summary(de_results)
+```
+
+```{r}
 topTable(efit, n = 20)
 
-dir.create(here("output/DEGs"))
-dir.create(here("output/DEGs/filtered_output_3"))
+dir.create(here("output/DEGs/filtered_output_3"), recursive=TRUE)
 
-write.fit(efit, de_results, file=here("output/DEGs/filtered_output_3/DE_results_voom.txt"))
+# Sort the top table by adjusted P value
+sorted_de <- topTable(efit, number=Inf, sort.by="P")
+sorted_de <- sorted_de[order(sorted_de$adj.P.Val), ]
+
+# Write to a file
+write.table(sorted_de, file=here("output/DEGs/filtered_output_3/FO3_DE_results_voom.tsv"),
+            sep="\t", quote=FALSE, row.names=FALSE)
 ```
+
+A table of the differential expression results are saved in `output/DEGs/filtered_output_3/FO3_DE_results_voom.tsv`.
+The rows are sorted so the genes with the lowest adjusted p-value are at the top. 
