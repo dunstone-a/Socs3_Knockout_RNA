@@ -1,0 +1,52 @@
+---
+title: "Options for further analysis"
+author:
+  - name: Amelia Dunstone
+    url: https://github.com/dunstone-a
+    affiliation: St. Vincent's Institute of Medical Research
+    affiliation_url: https://gitlab.svi.edu.au/biocellgen-public
+date: "`r Sys.Date()`"
+editor_options: 
+  chunk_output_type: console
+output: distill::distill_article
+---
+
+There are some ways that the pre-processing could be improved for this analysis to hopefully lead to more conclusive results. These are related to the choice of alignment tool to use (e.g., Hisat2, STAR, kallisto, salmon), trimming of adapter sequences using cutadapt, and dealing with PCR duplicates. 
+
+Some possible analyses to try are listed below. 
+
+1. Re-run Hisat2 on the raw FastQ's that have not had anything trimmed using cutadapt. So far me and Natalie have not run cutadapt correctly and so we were accidentally searching for the wrong sequences to trim. I believe this resulted in us losing some ability to distinguish the two treatment groups. 
+
+2. Run cutadapt correctly using the adapter sequences available in the 12 FastQC reports for the merged data (`output/FastQC_merged/`), and the file [fastqc_top_overrepresented_sequences_table.tsv](output/Socs3_MultiQC_merged_multiqc_report_data/fastqc_top_overrepresented_sequences_table.tsv). Each merged .fastq file has 1-3 adapter sequences that should be trimmed.
+
+An example for the sample `260_Cort_22YMFCLT3` is:
+
+```
+SAMPLE="260_Cort_22YMFCLT3_R1"
+mkdir -p ${OUTDIR}/cutadapt_merged
+
+# For paired end reads, use -a for R1 and -A for R2.
+cutadapt \
+    -a TCTGTCTCTTATACACATCTCCGAGCCCACGAGACAGAATTCGCCATCTG \
+    -a TCTGTCTCTTATACACATCTCCGAGCCCACGAGACAGAATTCGCCATCTA \
+    -a TCCCCTCCTTAGGCAACCTGGTGGTCCCCCGCTCCCGGGAGGTCACCATA \
+    -A ACTGTCTCTTATACACATCTGACGCTGCCGACGAGAGCTTGCCGGTGTAG \
+    -A TCGGTGGCGCACGCCTGTAGTCCCAGCTACTCGGGAGGCTGAGACAGGAG \
+    --minimum-length 20 \
+    -o "../data/cutadapt_merged/${SAMPLE}_R1.fastq.gz" \
+    -p "../data/cutadapt_merged/${SAMPLE}_R2.fastq.gz" \
+    "../data/merged_fastq/${SAMPLE}_R1_merged.fastq.gz" \
+    "../data/merged_fastq/${SAMPLE}_R2_merged.fastq.gz"
+```
+
+This trims three overrepresented sequences from the read 1 files and 2 from the read 2 files. To know what sequences to use for this sample, I looked at the reports below:
+
+```
+output/FastQC_merged/260_Cort_22YMFCLT3_R1_merged_fastqc.html
+output/FastQC_merged/260_Cort_22YMFCLT3_R2_merged_fastqc.html
+```
+
+This can be repeated for the other 5 samples. 
+
+3. Look into the best way to deal with PCR duplicates. I think this isn't a problem with Hisat2, but I think it could impact the kallisto analysis. The FastQC report `output/Socs3_MultiQC_merged_multiqc_report.html` shows that the samples have 80% PCR duplicates when merged together. 
+
