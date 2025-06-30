@@ -28,7 +28,7 @@ navbar:
   right:
   - icon: fab fa-github
     text: Source code
-    href: https://gitlab.svi.edu.au/igr-lab/Socs3_Knockout_RNA
+    href: https://gitlab.svi.edu.au/biocellgen-private/socs3_knockout_rna
 output:
   distill::distill_article:
     toc: true

@@ -652,9 +652,10 @@ lcpm[selected_genes, ] |>
 
 # Differential Expression Analyses
 
-We have `r nrow(dge)` genes which we are testing for cha... 
-It is very important to use a multiple testing correction such as the False Discovery Rate (FDR) to account for the high number of discoveries which would occur by chance even if there were no differences between the two treatments.  
-
+We will be including `r nrow(dge)` genes in our differential expression analyses.
+Due to the high number of tests being performed, it is very important to use some form of multiple testing correction such as the False Discovery Rate (FDR). 
+When performing tens of thousands of tests, there will be many significant genes (p-value < 0.05) even if there are no real differences between the treatments.
+Multiple testing correction makes the threshold for p-values stricter to account for this. 
 
 ## Treatment with limma::voom method
 

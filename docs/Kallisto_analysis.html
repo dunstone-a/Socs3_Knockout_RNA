@@ -2166,7 +2166,7 @@ Supplementary files
 <a href="FurtherAnalysis.html">Further analyses</a>
 </div>
 <div class="nav-right">
-<a href="https://gitlab.svi.edu.au/igr-lab/Socs3_Knockout_RNA" aria-label="Source code">
+<a href="https://gitlab.svi.edu.au/biocellgen-private/socs3_knockout_rna" aria-label="Source code">
 <i class="fab fa-github" aria-hidden="true"></i>
 </a>
 <a href="javascript:void(0);" class="nav-toggle">&#9776;</a>
@@ -3151,8 +3151,10 @@ Show code
 3 5.422480</code></pre>
 </div>
 <h1 id="differential-expression-analyses">Differential Expression Analyses</h1>
-<p>We have 21772 genes which we are testing for cha…
-It is very important to use a multiple testing correction such as the False Discovery Rate (FDR) to account for the high number of discoveries which would occur by chance even if there were no differences between the two treatments.</p>
+<p>We will be including 21772 genes in our differential expression analyses.
+Due to the high number of tests being performed, it is very important to use some form of multiple testing correction such as the False Discovery Rate (FDR).
+When performing tens of thousands of tests, there will be many significant genes (p-value &lt; 0.05) even if there are no real differences between the treatments.
+Multiple testing correction makes the threshold for p-values stricter to account for this.</p>
 <h2 id="treatment-with-limmavoom-method">Treatment with limma::voom method</h2>
 <p>Since there is a strong batch effect, we will include batch as a covariate in the differential expression analysis.
 The analysis below uses the <code>limma::voom()</code> method for differential expression testing.</p>
