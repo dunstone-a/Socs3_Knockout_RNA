@@ -5,12 +5,26 @@ navbar:
   left:
   - text: "Home"
     href: index.html
-  - text: "Analysis"
+  - text: "Kallisto"
     menu:
     - text: "Kallisto analysis"
       href: Kallisto_analysis.html
+  - text: "Hisat2 (old analysis)"
+    menu:
     - text: "Analysis of filtered output 3"
       href: Filtered_output_3_analysis.html
+    - text: "Lane based analysis"
+      href: Lane_based_analysis.html
+  - text: "Supplementary files"
+    menu:
+    - text: "MultiQC plot of lanes"
+      href: ../output/Socs3_MultiQC_multiqc_report.html
+    - text: "MultiQC plot of samples"
+      href: ../output/Socs3_MultiQC_merged_multiqc_report.html
+    - text: "Differential expression testing results"
+      href: ../output/DEGs/
+  - text: "Further analyses"
+    href: FurtherAnalysis.html
   right:
   - icon: fab fa-github
     text: Source code
@@ -19,3 +33,4 @@ output:
   distill::distill_article:
     toc: true
     toc_depth: 1
+    code_folding: true

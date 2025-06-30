@@ -11,6 +11,7 @@ editor_options:
 **Samples**:
 
 We have 6 mice samples, 3 are wild-type and 3 are Socs3 knockout samples. 
+The data is bulk RNA-sequencing from bone.
 
 - WT: Wild-type.
 - SOCS3: Socs3 gene knockout. 
@@ -23,3 +24,11 @@ There are 2 batches.
 
 - Batch1: 2 WT samples, 2 SOCS3 samples. 
 - Batch2: 1 WT sample, 1 SOCS3 sample.
+
+**Alignment tools**
+
+We tried out a few different pre-processing pipelines for this data. I have split them into broad categories based on the tool used for the alignment step. 
+
+- **kallisto**: Transcript-based method of alignment, more recommended currently. 
+- **Hisat2**: Gene-based method, not as commonly used anymore. 
+
