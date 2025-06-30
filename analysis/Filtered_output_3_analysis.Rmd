@@ -1,0 +1,476 @@
+---
+title: "Analysis of Filtered output 3"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+date: "`r Sys.Date()`"
+author: "Millie Dunstone and Natalie Koh"
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Introduction
+
+This analysis is based on the guide "RNA-seq analysis is easy as 1-2-3 with limma, Glimma and edgeR" (Law et al. 2018), see [https://pmc.ncbi.nlm.nih.gov/articles/PMC4937821/](https://pmc.ncbi.nlm.nih.gov/articles/PMC4937821/).
+
+```{r, echo = FALSE, message = FALSE, results = "none"}
+# Load required libraries for the document 
+library(limma) 
+library(edgeR) 
+library(RColorBrewer) 
+library(ggplot2) 
+library(gridExtra) 
+library(here)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+# BiocManager::install("Mus.musculus")
+library(Mus.musculus)
+library(RColorBrewer)
+```
+
+# Setting up the data
+
+## Reading in count data
+
+```{r}
+# Read in data
+counts <- read.csv(here("data/old_counts/filtered_output_3_combined_counts.csv"), header=TRUE) 
+rownames(counts) <- counts$gene 
+counts <- counts[, -1]   
+
+# Remove everything before the full stop
+colnames(counts) <- factor(gsub("filtered_output2_|260_|985_|Tube._", "", colnames(counts)))
+group <- factor(colnames(counts))
+
+dge <- DGEList(counts)
+class(dge)
+```
+
+## Organising sample information
+
+```{r}
+# Better to get the batch from the colnames also
+batch <- gsub(".+_", "", group)
+batch <- factor(gsub("B", "Batch", batch))
+
+# Replace uppercase with lowercase
+group <- factor(group)
+# Treatment labels SOCS3 or WT
+treatment <- factor(gsub("_.+", "", group))
+
+# Put sample information info DGEList object
+dge$samples$group <- group
+dge$samples$batch <- batch
+dge$samples$treatment <- treatment
+
+# Check that everything is consistent here
+table(group, treatment)
+table(group, batch)
+dge$samples
+
+# Remove group, treatment and batch. These should only be accessed from dge!!!
+rm(group, batch, treatment)
+```
+
+## Organising gene annotations
+
+```{r}
+geneid <- rownames(dge)
+
+# We have Ensembl ID's
+gene_map <- AnnotationDbi::select(Mus.musculus, keys=geneid, columns=c("SYMBOL", "TXCHROM"), 
+                keytype="ENSEMBL")
+
+# Investigate duplicate gene IDs
+
+# There are 63 duplicate IDs, for these use their Ensembl ID ... or just remove them?
+# Code to remove them:
+table(duplicated(gene_map$ENSEMBL))
+gene_map$SYMBOL[duplicated(gene_map$ENSEMBL)] <- gene_map$ENSEMBL[duplicated(gene_map$ENSEMBL)]
+
+# For NA symbols, use the ensembl gene id
+gene_map$SYMBOL <- ifelse(is.na(gene_map$SYMBOL), gene_map$ENSEMBL, gene_map$SYMBOL) 
+dge$genes <- gene_map[match(rownames(dge), gene_map$ENSEMBL), ]
+
+head(dge$genes)
+
+# Check that the gene information matches the ordering of the count matrix
+stopifnot(identical(rownames(dge), dge$genes$ENSEMBL))
+```
+
+# Pre-processing
+
+## Filter low quality genes
+
+```{r}
+# Transform from raw scale
+cpm <- edgeR::cpm(dge)
+lcpm <- edgeR::cpm(dge, log = TRUE)
+```
+
+```{r}
+# There are no genes that are expressed in no samples
+table(rowSums(dge$counts == 0))
+# The smallest amount of counts for a gene is 1 across the 6 samples
+min(rowSums(dge$counts))
+
+keep.exprs <- filterByExpr(dge, group=dge$samples$group)
+dge <- dge[keep.exprs,, keep.lib.sizes=FALSE]
+dim(dge)
+# We have removed 140 genes using filterByExpr.
+# This function keeps genes with about 10 read counts or more in a minimum
+# number of samples.
+sum(keep.exprs == FALSE)
+
+# rowSums(dge$counts == 0)
+```
+
+In the raw data, there is a spike of lowly expressed genes. 
+These are removed using the `filterByExpr` function. 
+
+```{r}
+# Figure 1: Density of the raw post filtered data
+
+# M is the mean, L is the median
+L <- mean(dge$samples$lib.size) * 1e-6
+M <- median(dge$samples$lib.size) * 1e-6
+c(L, M)
+
+lcpm.cutoff <- log2(10/M + 2/L)
+nsamples <- ncol(dge)
+col <- brewer.pal(nsamples, "Paired")
+par(mfrow=c(1,2))
+plot(density(lcpm[,1]), col=col[1], lwd=2, ylim=c(0,0.26), las=2, main="", xlab="")
+title(main="A. Raw data", xlab="Log-cpm")
+abline(v=lcpm.cutoff, lty=3)
+for (i in 2:nsamples){
+  den <- density(lcpm[,i])
+  lines(den$x, den$y, col=col[i], lwd=2)
+}
+legend("topright", as.character(dge$samples$group), text.col=col, bty="n")
+lcpm <- edgeR::cpm(dge, log=TRUE)
+plot(density(lcpm[,1]), col=col[1], lwd=2, ylim=c(0,0.26), las=2, main="", xlab="")
+title(main="B. Filtered data", xlab="Log-cpm")
+abline(v=lcpm.cutoff, lty=3)
+for (i in 2:nsamples){
+  den <- density(lcpm[,i])
+  lines(den$x, den$y, col=col[i], lwd=2)
+}
+legend("topright", as.character(dge$samples$group), text.col=col, bty="n")
+```
+
+## Quality control
+
+```{r}
+# Set colours for this data set
+group_colours <- setNames(
+    ggthemes::tableau_color_pal("Tableau 10")(6), 
+    levels(dge$samples$group))
+
+batch_colours <- setNames(
+    brewer.pal(8, "Dark2")[3:4], 
+    levels(dge$samples$batch))
+
+treatment_colours <- setNames(
+    brewer.pal(8, "Dark2")[1:2], 
+    levels(dge$samples$treatment))
+```
+
+The barcharts below show the library sizes for each sample, coloured by sample, batch and treatment. 
+
+### Barchart of library size
+
+```{r, fig.asp = 1}
+# this factor ordering for group is helpful for QC, as it puts everything from 
+# the same batch next to each other. 
+dge$samples$group <- factor(dge$samples$group,
+    levels = c("WT_2_B1", "WT_3_B1", "SOCS3_2_B1", "SOCS3_3_B1", "WT_1_B2", "SOCS3_1_B2"))
+
+p1 <- ggplot(data = dge$samples, mapping = aes(y = group, x = lib.size, fill = group)) + 
+    geom_col() +
+    scale_fill_manual(values = group_colours) +
+    scale_y_discrete(limits = rev(levels(dge$samples$group))) +
+    theme_minimal()
+p2 <- ggplot(data = dge$samples, mapping = aes(y = group, x = lib.size, fill = batch)) + 
+    geom_col() +
+    scale_fill_manual(values = batch_colours) +
+    scale_y_discrete(limits = rev(levels(dge$samples$group))) +
+    theme_minimal()
+p3 <- ggplot(data = dge$samples, mapping = aes(y = group, x = lib.size, fill = treatment)) + 
+    geom_col() +
+    scale_fill_manual(values = treatment_colours) + 
+    scale_y_discrete(limits = rev(levels(dge$samples$group))) +
+    theme_minimal()
+(p1 / p2 / p3) + plot_layout(guides = "collect")
+```
+
+### Number of expressed features
+
+Expressed features are defined as those with at least one count in a sample. 
+There is a similar number of expressed features in each sample. 
+Note however that 13,000 is quite low and the usual amount would be closer to 20,000 genes. 
+
+
+```{r}
+dge$samples$nFeatures <- apply(dge$counts, MARGIN = 2, FUN = function(x) {sum(x > 0)})
+
+dge$samples |>
+    dplyr::select(group, nFeatures) |>
+    knitr::kable()
+```
+
+```{r, fig.asp = 1, include = FALSE}
+# No trends here
+p1 <- ggplot(data = dge$samples, mapping = aes(y = group, x = nFeatures, fill = group)) + 
+    geom_col() +
+    scale_fill_manual(values = group_colours) +
+    scale_y_discrete(limits = rev(levels(dge$samples$group))) +
+    theme_minimal()
+p2 <- ggplot(data = dge$samples, mapping = aes(y = group, x = nFeatures, fill = batch)) + 
+    geom_col() +
+    scale_fill_manual(values = batch_colours) +
+    scale_y_discrete(limits = rev(levels(dge$samples$group))) +
+    theme_minimal()
+p3 <- ggplot(data = dge$samples, mapping = aes(y = group, x = nFeatures, fill = treatment)) + 
+    geom_col() +
+    scale_fill_manual(values = treatment_colours) + 
+    scale_y_discrete(limits = rev(levels(dge$samples$group))) +
+    theme_minimal()
+(p1 / p2 / p3) + plot_layout(guides = "collect")
+```
+
+###  Proportion of mitochondrial genes
+
+There are no mitochondrial genes in this count matrix. 
+
+```{r}
+table(dge$genes$TXCHROM)
+```
+
+## Normalisation
+
+The impact of normalisation is subtle. 
+Most notably, the third quantiles have been brought into alignment. 
+
+```{r}
+
+dge_raw <- dge
+dge <- calcNormFactors(dge, method = "TMM")
+
+# Library sizes
+dge_raw$samples$lib.size
+
+# Norm factors
+dge_raw$samples$norm.factors
+dge$samples$norm.factors
+
+# log-cpm in appropriate order for plot
+# NOTE: NEVER USE WITH dge$samples!!! For plotting only!!
+lcpm_raw_plot <- edgeR::cpm(dge_raw, log=TRUE)[, levels(dge_raw$samples$group)]
+lcpm_plot <- edgeR::cpm(dge, log = TRUE)[, levels(dge$samples$group)]
+
+# y-limit for plot 
+ylims <- range(c(lcpm_raw_plot, lcpm_plot))
+par(mfrow=c(1,2))
+
+boxplot(lcpm_raw_plot, las=2, col=col, main="", )
+title(main="A. Example: Unnormalised data", ylab="Log-cpm")
+
+boxplot(lcpm_plot, las=2, col=col, main="")
+title(main="B. Example: Normalised data", ylab="Log-cpm")
+```
+
+The plots below show the MDS plot before and after normalisation.
+This has a more obvious difference than the boxplot above.
+
+```{r, fig.asp = 1/2}
+par(mfrow = c(1,2))
+plotMDS(dge_raw, main="Before normalization", col=batch_colours[dge_raw$samples$batch])
+plotMDS(dge, main="After normalization", col=batch_colours[dge$samples$batch])
+```
+
+After normalising the data, we need to evaluate the log counts again. 
+
+```{r}
+lcpm <- edgeR::cpm(dge, log=TRUE)
+```
+
+# Visualising the data
+
+A useful tool to visualise RNA-seq data is the multi-dimensional scaling (MDS) plot.
+This plot can show us which samples are more similar to each other, and can help to identify outlying or low quality samples. 
+The first dimension captures the most amount of information about the data, while the second dimension captures the next biggest proportion of variation. 
+
+Things to look out for in this plot are:
+- Samples should cluster within the primary condition of interest, i.e., treatment. 
+- Technical replicates should lie very close to each other. 
+- The first dimension should explain treatment, and the second should explain batch. 
+
+The MDS plot below shows that the first dimension can be explained by batch (32% variation).
+The second dimension shows some separation by treatment and library size. 
+
+As the technical replicates have not clustered together, we cannot get DE for this data. 
+
+```{r}
+# NOTE: Even though it might seem like more typing, it is much better to use
+#   dge$samples$group than group. 
+#   It is very easy to have inconsistencies with labelling if not using the dge
+#   object every time. 
+par(mfrow = c(2,2))
+plotMDS(lcpm, labels=dge$samples$group, col=group_colours[dge$samples$group])
+title(main="A. Sample groups")
+
+plotMDS(lcpm, labels=dge$samples$treatment, col=treatment_colours[dge$samples$treatment])
+title(main="B. Treatment")
+
+plotMDS(lcpm, labels=dge$samples$batch, col=batch_colours[dge$samples$batch])
+title(main="C. Batch")
+
+# MDS plot with library size
+libsizes <- dge$samples$lib.size
+
+# Create a viridis color function
+color_func <- scales::col_numeric(viridis::viridis(100), domain = range(libsizes))
+
+# Assign colors according to library sizes
+point_colors <- color_func(libsizes)
+
+plotMDS(lcpm, labels=NULL, pch = 16, cex = 4, col=point_colors)
+title(main="D. Library Size") 
+```
+
+Plots showing genes of interest on MDS plot.
+
+```{r}
+par(mfrow = c(2,2))
+
+# Plot 3: Treatments 
+plotMDS(lcpm, labels=dge$samples$treatment, col=treatment_colours[dge$samples$treatment])
+title(main="C. Treatment") 
+
+
+genes_of_interest <- c("Socs3", "Socs1", "Bcl3")
+
+# Plot 5: Socs gene. 
+gene_name <- genes_of_interest[1]
+gene_expression <- lcpm[grep(gene_name, dge$genes$SYMBOL), ]
+
+# Create a viridis color function
+color_func <- scales::col_numeric(viridis::viridis(100), domain = range(gene_expression))
+
+# Assign colors according to library sizes
+point_colors <- color_func(gene_expression)
+
+plotMDS(lcpm, labels=NULL, pch = 16, cex = 4, col=point_colors)
+title(main=paste0(gene_name, " Expression (log CPM)")) 
+
+
+gene_name <- genes_of_interest[2]
+gene_expression <- lcpm[grep(gene_name, dge$genes$SYMBOL), ]
+
+# Create a viridis color function
+color_func <- scales::col_numeric(viridis::viridis(100), domain = range(gene_expression))
+
+# Assign colors according to library sizes
+point_colors <- color_func(gene_expression)
+
+plotMDS(lcpm, labels=NULL, pch = 16, cex = 4, col=point_colors)
+title(main=paste0(gene_name, " Expression (log CPM)")) 
+
+
+gene_name <- genes_of_interest[3]
+gene_expression <- lcpm[grep(gene_name, dge$genes$SYMBOL), ]
+
+# Create a viridis color function
+color_func <- scales::col_numeric(viridis::viridis(100), domain = range(gene_expression))
+
+# Assign colors according to library sizes
+point_colors <- color_func(gene_expression)
+
+plotMDS(lcpm, labels=NULL, pch = 16, cex = 4, col=point_colors)
+title(main=paste0(gene_name, " Expression (log CPM)")) 
+```
+
+
+## Comparing batches for genes of interest
+
+Based on a priori knowledge, the SOCS3 knockout samples should express Socs1 and Socs3 less than the WT. 
+Bcl3 should be higher in the SOCS3 group. 
+
+```{r, fig.asp = 1/2}
+genes_of_interest <- c("Socs3", "Socs1", "Bcl3")
+selected_genes <- match(genes_of_interest, dge$genes$SYMBOL)
+
+df <- data.frame(
+    y = t(lcpm[selected_genes, ]), 
+    treatment = dge$samples$treatment, 
+    batch = dge$samples$batch)
+
+colnames(df)[1:3] <- genes_of_interest
+
+df$labels <- factor(paste0(df$batch, ".", df$treatment), 
+    levels = c("Batch1.WT", "Batch1.SOCS3", "Batch2.WT", "Batch2.SOCS3"))
+
+treatment_colours <- setNames(
+    RColorBrewer::brewer.pal(3, "Dark2")[1:2], 
+    levels(dge$samples$treatment))
+
+plot_list <- list()
+for (i in 1:3) {
+    plot_list[[i]] <-
+        ggplot(data = df, mapping = aes(x = labels, y = .data[[genes_of_interest[i]]], group = labels, colour = treatment)) + 
+            geom_point(size = 4) + 
+            theme_minimal() + 
+            theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+            ylab("Expression (log CPM)") + 
+            scale_colour_manual(values = treatment_colours) +
+            ggtitle(label = paste0(genes_of_interest[i])
+    )
+}
+patchwork::wrap_plots(plot_list, ncol = 3, guides = "collect") 
+```
+
+
+# Differential Expression Analyses
+
+Since there is a strong batch effect, we will include batch as a covariate in the differential expression analysis. 
+
+```{r}
+design <- model.matrix(~0+treatment+batch, data = dge$samples)
+
+colnames(design) <- gsub("treatment", "", colnames(design))
+design
+
+contr.matrix <- makeContrasts(
+   SOCS3vsWT = SOCS3 - WT,
+   levels = colnames(design))
+contr.matrix
+
+
+v <- voom(dge, design, plot=TRUE)
+v
+
+
+vfit <- lmFit(v, design)
+vfit <- contrasts.fit(vfit, contrasts=contr.matrix)
+
+efit <- eBayes(vfit)
+plotSA(efit)
+
+de_results <- decideTests(efit, adjust.method = "fdr")
+summary(de_results)
+
+topTable(efit, n = 20)
+
+dir.create(here("output/DEGs"))
+dir.create(here("output/DEGs/filtered_output_3"))
+
+write.fit(efit, de_results, file=here("output/DEGs/filtered_output_3/DE_results_voom.txt"))
+```
