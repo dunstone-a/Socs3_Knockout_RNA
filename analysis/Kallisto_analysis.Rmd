@@ -47,13 +47,6 @@ There are 6 samples so this results in 12 .fastq files (read 1 and read 2 for ea
 
 Next, the paired-end reads were aligned to the reference mouse transcriptome using `kallisto`.
 
-## Mapping rate in kallisto
-
-We have a decently 
-
-
-
-
 ## Reading in count data
 
 Since `kallisto` uses transcript IDs instead of gene IDs, we will use the `biomaRt` package to map transcript IDs to gene IDs. 
@@ -120,6 +113,34 @@ stopifnot(identical(samples$Sample_name, colnames(counts)))
 colnames(counts) <- samples$group
 ```
 
+## Kallisto mapping information
+
+The table below shows the percentage of reads which are mapped. 
+This mapping rate looks okay.
+
+```{r}
+library(jsonlite)
+
+# Path to each kallisto folder
+sample_dirs <- dirname(file_paths)
+
+# Extract mapping rate from run_info.json for each sample
+mapping_rates <- sapply(sample_dirs, function(dir) {
+  info <- fromJSON(file.path(dir, "run_info.json"))
+  info$p_pseudoaligned
+}) / 100
+
+df <- data.frame(
+    File = gsub("_22YMFCLT3_output", "", basename(sample_dirs)),
+    Mapping_rate = mapping_rates)
+df$Group <- samples$group[match(df$File, samples$Sample_name)]
+
+rownames(df) <- NULL
+df[, c("Group", "Mapping_rate")]|> 
+    janitor::adorn_pct_formatting() |>
+    knitr::kable() 
+```
+
 Next we create a DGEList from the count data and the sample sheet. 
 The count data contains a column for each sample of the experiment (6 in total). 
 The sample sheet includes information about the mouse genotype and the batches. 
@@ -137,32 +158,6 @@ dge <- DGEList(
 dim(dge)
 ```
 
-## Kallisto mapping information
-
-The table below shows the percentage of reads which are mapped. 
-This is a decent proportion.
-
-```{r}
-library(jsonlite)
-
-# Path to each kallisto folder
-sample_dirs <- dirname(file_paths)
-
-# Extract mapping rate from run_info.json for each sample
-mapping_rates <- sapply(sample_dirs, function(dir) {
-  info <- fromJSON(file.path(dir, "run_info.json"))
-  info$p_pseudoaligned
-})
-
-df <- data.frame(
-    File = gsub("_22YMFCLT3_output", "", basename(sample_dirs)),
-    Mapping_rate = mapping_rates)
-df$Group <- samples$group[match(df$File, samples$Sample_name)]
-
-rownames(df) <- NULL
-df[, c("Group", "Mapping_rate")]|> 
-    knitr::kable() 
-```
 
 ## Organising sample information
 

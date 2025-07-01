@@ -93,8 +93,8 @@ code span.wa { color: #5e5e5e; font-style: italic; } /* Warning */
 
 
   <!--  https://schema.org/Article -->
-  <meta property="article:published" itemprop="datePublished" content="2025-06-30"/>
-  <meta property="article:created" itemprop="dateCreated" content="2025-06-30"/>
+  <meta property="article:published" itemprop="datePublished" content="2025-07-01"/>
+  <meta property="article:created" itemprop="dateCreated" content="2025-07-01"/>
   <meta name="article:author" content="Amelia Dunstone"/>
 
   <!--  https://developers.facebook.com/docs/sharing/webmasters#markup -->
@@ -111,7 +111,7 @@ code span.wa { color: #5e5e5e; font-style: italic; } /* Warning */
   <!--radix_placeholder_rmarkdown_metadata-->
 
   <script type="text/json" id="radix-rmarkdown-metadata">
-  {"type":"list","attributes":{"names":{"type":"character","attributes":{},"value":["title","author","date","editor_options","output"]}},"value":[{"type":"character","attributes":{},"value":["Analysis of the Socs3 knockout data with kallisto alignment."]},{"type":"list","attributes":{},"value":[{"type":"list","attributes":{"names":{"type":"character","attributes":{},"value":["name","url","affiliation","affiliation_url"]}},"value":[{"type":"character","attributes":{},"value":["Amelia Dunstone"]},{"type":"character","attributes":{},"value":["https://github.com/dunstone-a"]},{"type":"character","attributes":{},"value":["St. Vincent's Institute of Medical Research"]},{"type":"character","attributes":{},"value":["https://gitlab.svi.edu.au/biocellgen-public"]}]}]},{"type":"character","attributes":{},"value":["2025-06-30"]},{"type":"list","attributes":{"names":{"type":"character","attributes":{},"value":["chunk_output_type"]}},"value":[{"type":"character","attributes":{},"value":["console"]}]},{"type":"character","attributes":{},"value":["distill::distill_article"]}]}
+  {"type":"list","attributes":{"names":{"type":"character","attributes":{},"value":["title","author","date","editor_options","output"]}},"value":[{"type":"character","attributes":{},"value":["Analysis of the Socs3 knockout data with kallisto alignment."]},{"type":"list","attributes":{},"value":[{"type":"list","attributes":{"names":{"type":"character","attributes":{},"value":["name","url","affiliation","affiliation_url"]}},"value":[{"type":"character","attributes":{},"value":["Amelia Dunstone"]},{"type":"character","attributes":{},"value":["https://github.com/dunstone-a"]},{"type":"character","attributes":{},"value":["St. Vincent's Institute of Medical Research"]},{"type":"character","attributes":{},"value":["https://gitlab.svi.edu.au/biocellgen-public"]}]}]},{"type":"character","attributes":{},"value":["2025-07-01"]},{"type":"list","attributes":{"names":{"type":"character","attributes":{},"value":["chunk_output_type"]}},"value":[{"type":"character","attributes":{},"value":["console"]}]},{"type":"character","attributes":{},"value":["distill::distill_article"]}]}
   </script>
   <!--/radix_placeholder_rmarkdown_metadata-->
   <!--radix_placeholder_navigation_in_header-->
@@ -2120,7 +2120,7 @@ code span.wa { color: #5e5e5e; font-style: italic; } /* Warning */
 <!--radix_placeholder_front_matter-->
 
 <script id="distill-front-matter" type="text/json">
-{"title":"Analysis of the Socs3 knockout data with kallisto alignment.","authors":[{"author":"Amelia Dunstone","authorURL":"https://github.com/dunstone-a","affiliation":"St. Vincent's Institute of Medical Research","affiliationURL":"https://gitlab.svi.edu.au/biocellgen-public","orcidID":""}],"publishedDate":"2025-06-30T00:00:00.000+10:00","citationText":"Dunstone, 2025"}
+{"title":"Analysis of the Socs3 knockout data with kallisto alignment.","authors":[{"author":"Amelia Dunstone","authorURL":"https://github.com/dunstone-a","affiliation":"St. Vincent's Institute of Medical Research","affiliationURL":"https://gitlab.svi.edu.au/biocellgen-public","orcidID":""}],"publishedDate":"2025-07-01T00:00:00.000+10:00","citationText":"Dunstone, 2025"}
 </script>
 
 <!--/radix_placeholder_front_matter-->
@@ -2188,7 +2188,7 @@ Supplementary files
 <div class="d-byline">
   Amelia Dunstone <a href="https://github.com/dunstone-a" class="uri">https://github.com/dunstone-a</a> (St. Vincent’s Institute of Medical Research)<a href="https://gitlab.svi.edu.au/biocellgen-public" class="uri">https://gitlab.svi.edu.au/biocellgen-public</a>
   
-<br/>2025-06-30
+<br/>2025-07-01
 </div>
 
 <div class="d-article">
@@ -2237,8 +2237,6 @@ Show code
 First, the .fastq files from the same sample and read combination were merged together (see <code>code/03_merge_lanes.sh</code>.
 There are 6 samples so this results in 12 .fastq files (read 1 and read 2 for each sample).</p>
 <p>Next, the paired-end reads were aligned to the reference mouse transcriptome using <code>kallisto</code>.</p>
-<h2 id="mapping-rate-in-kallisto">Mapping rate in kallisto</h2>
-<p>We have a decently</p>
 <h2 id="reading-in-count-data">Reading in count data</h2>
 <p>Since <code>kallisto</code> uses transcript IDs instead of gene IDs, we will use the <code>biomaRt</code> package to map transcript IDs to gene IDs.
 When we import the data using <code>tximport</code>, the transcripts are aggregated at the gene level using this mapping.</p>
@@ -2327,6 +2325,72 @@ Show code
 </div>
 </details>
 </div>
+<h2 id="kallisto-mapping-information">Kallisto mapping information</h2>
+<p>The table below shows the percentage of reads which are mapped.
+This mapping rate looks okay.</p>
+<div class="layout-chunk" data-layout="l-body">
+<details>
+<summary>
+Show code
+</summary>
+<div class="sourceCode">
+<pre class="sourceCode r"><code class="sourceCode r"><span><span class='kw'><a href='https://rdrr.io/r/base/library.html'>library</a></span><span class='op'>(</span><span class='va'><a href='https://jeroen.r-universe.dev/jsonlite'>jsonlite</a></span><span class='op'>)</span></span>
+<span></span>
+<span><span class='co'># Path to each kallisto folder</span></span>
+<span><span class='va'>sample_dirs</span> <span class='op'>&lt;-</span> <span class='fu'><a href='https://rdrr.io/r/base/basename.html'>dirname</a></span><span class='op'>(</span><span class='va'>file_paths</span><span class='op'>)</span></span>
+<span></span>
+<span><span class='co'># Extract mapping rate from run_info.json for each sample</span></span>
+<span><span class='va'>mapping_rates</span> <span class='op'>&lt;-</span> <span class='fu'><a href='https://rdrr.io/r/base/lapply.html'>sapply</a></span><span class='op'>(</span><span class='va'>sample_dirs</span>, <span class='kw'>function</span><span class='op'>(</span><span class='va'>dir</span><span class='op'>)</span> <span class='op'>{</span></span>
+<span>  <span class='va'>info</span> <span class='op'>&lt;-</span> <span class='fu'><a href='https://jeroen.r-universe.dev/jsonlite/reference/fromJSON.html'>fromJSON</a></span><span class='op'>(</span><span class='fu'><a href='https://rdrr.io/r/base/file.path.html'>file.path</a></span><span class='op'>(</span><span class='va'>dir</span>, <span class='st'>"run_info.json"</span><span class='op'>)</span><span class='op'>)</span></span>
+<span>  <span class='va'>info</span><span class='op'>$</span><span class='va'>p_pseudoaligned</span></span>
+<span><span class='op'>}</span><span class='op'>)</span> <span class='op'>/</span> <span class='fl'>100</span></span>
+<span></span>
+<span><span class='va'>df</span> <span class='op'>&lt;-</span> <span class='fu'><a href='https://rdrr.io/r/base/data.frame.html'>data.frame</a></span><span class='op'>(</span></span>
+<span>    File <span class='op'>=</span> <span class='fu'><a href='https://rdrr.io/r/base/grep.html'>gsub</a></span><span class='op'>(</span><span class='st'>"_22YMFCLT3_output"</span>, <span class='st'>""</span>, <span class='fu'><a href='https://rdrr.io/r/base/basename.html'>basename</a></span><span class='op'>(</span><span class='va'>sample_dirs</span><span class='op'>)</span><span class='op'>)</span>,</span>
+<span>    Mapping_rate <span class='op'>=</span> <span class='va'>mapping_rates</span><span class='op'>)</span></span>
+<span><span class='va'>df</span><span class='op'>$</span><span class='va'>Group</span> <span class='op'>&lt;-</span> <span class='va'>samples</span><span class='op'>$</span><span class='va'>group</span><span class='op'>[</span><span class='fu'><a href='https://rdrr.io/r/base/match.html'>match</a></span><span class='op'>(</span><span class='va'>df</span><span class='op'>$</span><span class='va'>File</span>, <span class='va'>samples</span><span class='op'>$</span><span class='va'>Sample_name</span><span class='op'>)</span><span class='op'>]</span></span>
+<span></span>
+<span><span class='fu'><a href='https://rdrr.io/r/base/colnames.html'>rownames</a></span><span class='op'>(</span><span class='va'>df</span><span class='op'>)</span> <span class='op'>&lt;-</span> <span class='cn'>NULL</span></span>
+<span><span class='va'>df</span><span class='op'>[</span>, <span class='fu'><a href='https://rdrr.io/r/base/c.html'>c</a></span><span class='op'>(</span><span class='st'>"Group"</span>, <span class='st'>"Mapping_rate"</span><span class='op'>)</span><span class='op'>]</span><span class='op'>|&gt;</span> </span>
+<span>    <span class='fu'>janitor</span><span class='fu'>::</span><span class='fu'><a href='https://sfirke.github.io/janitor/reference/adorn_pct_formatting.html'>adorn_pct_formatting</a></span><span class='op'>(</span><span class='op'>)</span> <span class='op'>|&gt;</span></span>
+<span>    <span class='fu'>knitr</span><span class='fu'>::</span><span class='fu'><a href='https://rdrr.io/pkg/knitr/man/kable.html'>kable</a></span><span class='op'>(</span><span class='op'>)</span> </span></code></pre>
+</div>
+</details>
+<table>
+<thead>
+<tr class="header">
+<th style="text-align: left;">Group</th>
+<th style="text-align: left;">Mapping_rate</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">WT_1_B2</td>
+<td style="text-align: left;">53.8%</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">SOCS3_1_B2</td>
+<td style="text-align: left;">49.6%</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">SOCS3_2_B1</td>
+<td style="text-align: left;">73.0%</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">SOCS3_3_B1</td>
+<td style="text-align: left;">63.7%</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">WT_2_B1</td>
+<td style="text-align: left;">64.8%</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">WT_3_B1</td>
+<td style="text-align: left;">73.0%</td>
+</tr>
+</tbody>
+</table>
+</div>
 <p>Next we create a DGEList from the count data and the sample sheet.
 The count data contains a column for each sample of the experiment (6 in total).
 The sample sheet includes information about the mouse genotype and the batches.</p>
@@ -2347,71 +2411,6 @@ Show code
 </div>
 </details>
 <pre><code>[1] 36091     6</code></pre>
-</div>
-<h2 id="kallisto-mapping-information">Kallisto mapping information</h2>
-<p>The table below shows the percentage of reads which are mapped.
-This is a decent proportion.</p>
-<div class="layout-chunk" data-layout="l-body">
-<details>
-<summary>
-Show code
-</summary>
-<div class="sourceCode">
-<pre class="sourceCode r"><code class="sourceCode r"><span><span class='kw'><a href='https://rdrr.io/r/base/library.html'>library</a></span><span class='op'>(</span><span class='va'><a href='https://jeroen.r-universe.dev/jsonlite'>jsonlite</a></span><span class='op'>)</span></span>
-<span></span>
-<span><span class='co'># Path to each kallisto folder</span></span>
-<span><span class='va'>sample_dirs</span> <span class='op'>&lt;-</span> <span class='fu'><a href='https://rdrr.io/r/base/basename.html'>dirname</a></span><span class='op'>(</span><span class='va'>file_paths</span><span class='op'>)</span></span>
-<span></span>
-<span><span class='co'># Extract mapping rate from run_info.json for each sample</span></span>
-<span><span class='va'>mapping_rates</span> <span class='op'>&lt;-</span> <span class='fu'><a href='https://rdrr.io/r/base/lapply.html'>sapply</a></span><span class='op'>(</span><span class='va'>sample_dirs</span>, <span class='kw'>function</span><span class='op'>(</span><span class='va'>dir</span><span class='op'>)</span> <span class='op'>{</span></span>
-<span>  <span class='va'>info</span> <span class='op'>&lt;-</span> <span class='fu'><a href='https://jeroen.r-universe.dev/jsonlite/reference/fromJSON.html'>fromJSON</a></span><span class='op'>(</span><span class='fu'><a href='https://rdrr.io/r/base/file.path.html'>file.path</a></span><span class='op'>(</span><span class='va'>dir</span>, <span class='st'>"run_info.json"</span><span class='op'>)</span><span class='op'>)</span></span>
-<span>  <span class='va'>info</span><span class='op'>$</span><span class='va'>p_pseudoaligned</span></span>
-<span><span class='op'>}</span><span class='op'>)</span></span>
-<span></span>
-<span><span class='va'>df</span> <span class='op'>&lt;-</span> <span class='fu'><a href='https://rdrr.io/r/base/data.frame.html'>data.frame</a></span><span class='op'>(</span></span>
-<span>    File <span class='op'>=</span> <span class='fu'><a href='https://rdrr.io/r/base/grep.html'>gsub</a></span><span class='op'>(</span><span class='st'>"_22YMFCLT3_output"</span>, <span class='st'>""</span>, <span class='fu'><a href='https://rdrr.io/r/base/basename.html'>basename</a></span><span class='op'>(</span><span class='va'>sample_dirs</span><span class='op'>)</span><span class='op'>)</span>,</span>
-<span>    Mapping_rate <span class='op'>=</span> <span class='va'>mapping_rates</span><span class='op'>)</span></span>
-<span><span class='va'>df</span><span class='op'>$</span><span class='va'>Group</span> <span class='op'>&lt;-</span> <span class='va'>samples</span><span class='op'>$</span><span class='va'>group</span><span class='op'>[</span><span class='fu'><a href='https://rdrr.io/r/base/match.html'>match</a></span><span class='op'>(</span><span class='va'>df</span><span class='op'>$</span><span class='va'>File</span>, <span class='va'>samples</span><span class='op'>$</span><span class='va'>Sample_name</span><span class='op'>)</span><span class='op'>]</span></span>
-<span></span>
-<span><span class='fu'><a href='https://rdrr.io/r/base/colnames.html'>rownames</a></span><span class='op'>(</span><span class='va'>df</span><span class='op'>)</span> <span class='op'>&lt;-</span> <span class='cn'>NULL</span></span>
-<span><span class='va'>df</span><span class='op'>[</span>, <span class='fu'><a href='https://rdrr.io/r/base/c.html'>c</a></span><span class='op'>(</span><span class='st'>"Group"</span>, <span class='st'>"Mapping_rate"</span><span class='op'>)</span><span class='op'>]</span><span class='op'>|&gt;</span> </span>
-<span>    <span class='fu'>knitr</span><span class='fu'>::</span><span class='fu'><a href='https://rdrr.io/pkg/knitr/man/kable.html'>kable</a></span><span class='op'>(</span><span class='op'>)</span> </span></code></pre>
-</div>
-</details>
-<table>
-<thead>
-<tr class="header">
-<th style="text-align: left;">Group</th>
-<th style="text-align: right;">Mapping_rate</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td style="text-align: left;">WT_1_B2</td>
-<td style="text-align: right;">53.8</td>
-</tr>
-<tr class="even">
-<td style="text-align: left;">SOCS3_1_B2</td>
-<td style="text-align: right;">49.6</td>
-</tr>
-<tr class="odd">
-<td style="text-align: left;">SOCS3_2_B1</td>
-<td style="text-align: right;">73.0</td>
-</tr>
-<tr class="even">
-<td style="text-align: left;">SOCS3_3_B1</td>
-<td style="text-align: right;">63.7</td>
-</tr>
-<tr class="odd">
-<td style="text-align: left;">WT_2_B1</td>
-<td style="text-align: right;">64.8</td>
-</tr>
-<tr class="even">
-<td style="text-align: left;">WT_3_B1</td>
-<td style="text-align: right;">73.0</td>
-</tr>
-</tbody>
-</table>
 </div>
 <h2 id="organising-sample-information">Organising sample information</h2>
 <div class="layout-chunk" data-layout="l-body">
