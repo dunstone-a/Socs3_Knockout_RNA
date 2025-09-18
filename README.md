@@ -2,4 +2,4 @@
 
 Bulk RNA-seq analysis of a data set of bone samples from wild-type and Socs3 knockout mice. 
 
-Webpage: https://dunstone-a.github.io/Socs3_Knockout_RNA/
+Website: https://dunstone-a.github.io/Socs3_Knockout_RNA/
